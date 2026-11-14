@@ -7,12 +7,30 @@ CERTS_DIR := nginx/certs
 KEY_FILE := $(CERTS_DIR)/homeserver.lan.key
 CRT_FILE := $(CERTS_DIR)/homeserver.lan.crt
 
-.PHONY: check smoke certs renew-certs ca-backup ca-restore clean
+.PHONY: up down check smoke certs renew-certs ca-backup ca-restore clean
+
+# up starts everything (issuing the certificate first if needed).
+up:
+	docker compose up -d --build
+
+down:
+	docker compose down
 
 # check validates the scripts and configuration without starting anything.
+# nginx -t runs against a throwaway certificate.
 check:
 	$(SHELLCHECK) certs/issue-certs.sh scripts/*.sh
 	docker compose --env-file .env.template config -q
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+	openssl req -x509 -newkey rsa:2048 -noenc -days 1 -subj /CN=check \
+		-keyout "$$tmp/homeserver.lan.key" -out "$$tmp/homeserver.lan.crt" 2>/dev/null && \
+	cp "$$tmp/homeserver.lan.crt" "$$tmp/rootCA.crt" && chmod 644 "$$tmp"/* && \
+	docker run --rm \
+		-v "$(CURDIR)/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+		-v "$(CURDIR)/nginx/ssl-params.conf:/etc/nginx/ssl-params.conf:ro" \
+		-v "$(CURDIR)/nginx/sites:/etc/nginx/sites:ro" \
+		-v "$$tmp:/etc/nginx/certs:ro" \
+		nginx:stable-alpine nginx -t
 
 # smoke runs the whole stack under a throwaway project and checks it.
 smoke:

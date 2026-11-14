@@ -56,3 +56,31 @@ if docker compose -p "$project" --env-file "$tmp/env-no-ip" run --rm certs >/dev
 	fail "certs: ran without LAN_IP"
 fi
 echo "certs: ok"
+
+# --- nginx ---------------------------------------------------------------
+compose up -d --build --wait nginx >/dev/null 2>&1 || fail "nginx: did not start"
+ca="$CERTS_DIR/rootCA.crt"
+https() { curl -s --cacert "$ca" --resolve "homeserver.lan:$HTTPS_PORT:127.0.0.1" "$@"; }
+
+# The CA certificate is served over plain HTTP (devices don't trust HTTPS yet).
+[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$HTTP_PORT/rootCA.crt")" = 200 ] ||
+	fail "nginx: /rootCA.crt not served over HTTP"
+curl -s "http://127.0.0.1:$HTTP_PORT/rootCA.crt" | cmp -s - "$ca" ||
+	fail "nginx: /rootCA.crt is not the CA certificate"
+
+# Everything else over HTTP redirects to HTTPS, same host and path.
+redirect=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "http://127.0.0.1:$HTTP_PORT/x?y=1")
+case "$redirect" in
+"301 https://127.0.0.1/x?y=1") ;;
+*) fail "nginx: HTTP not redirected to HTTPS ($redirect)" ;;
+esac
+
+# The dashboard over HTTPS, trusted through the home CA, by name and by IP.
+[ "$(https -o /dev/null -w '%{http_code}' "https://homeserver.lan:$HTTPS_PORT/")" = 200 ] ||
+	fail "nginx: dashboard not served over HTTPS"
+https "https://homeserver.lan:$HTTPS_PORT/" | grep -q '</html>' || fail "nginx: dashboard body"
+[ "$(curl -s --cacert "$ca" -o /dev/null -w '%{http_code}' "https://127.0.0.1:$HTTPS_PORT/")" = 200 ] ||
+	fail "nginx: dashboard not served by IP"
+[ "$(https -o /dev/null -w '%{http_code}' "https://homeserver.lan:$HTTPS_PORT/nope")" = 404 ] ||
+	fail "nginx: unknown path is not 404"
+echo "nginx: ok"
