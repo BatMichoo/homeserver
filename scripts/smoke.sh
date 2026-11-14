@@ -13,6 +13,14 @@ unset COUNTRY_ISO PROVINCE CITY ORG_NAME LAN_DOMAIN LAN_IP CERTS_UID CERTS_GID \
 project=homeserver-smoke
 tmp=$(mktemp -d)
 export CERTS_DIR="$tmp/certs" HTTP_PORT=18080 HTTPS_PORT=18443
+# What the deployer publishes for the dashboard (a sample here).
+export DEPLOY_PUBLIC_DIR="$tmp/deploy-public"
+mkdir -p "$DEPLOY_PUBLIC_DIR"
+cat >"$DEPLOY_PUBLIC_DIR/status.json" <<'JSON'
+{"version": 1, "last_result": "partial", "deployed": {"commit": "abc1234", "subject": "smoke", "at": "2026-11-15T10:00:00Z"},
+ "held": [{"service": "web", "commit": "abc1234", "since": "2026-11-15T10:00:00Z", "reason": "unhealthy"}],
+ "cert_expiry": "2027-12-17T10:00:00Z", "events": [], "updated_at": "2026-11-15T10:00:00Z"}
+JSON
 
 cat >"$tmp/env" <<ENV
 COUNTRY_ISO=BG
@@ -174,6 +182,15 @@ for url in "http://127.0.0.1:$HTTP_PORT/rootCA.crt" "http://127.0.0.1:$HTTP_PORT
 		echo "$headers" | grep -qx "$h" || fail "nginx: $url lacks '$h'"
 	done
 done
+
+# The deployer's status for the dashboard, never cached.
+status_url="https://homeserver.lan:$HTTPS_PORT/deploy/status.json"
+https "$status_url" | grep -q '"last_result": "partial"' || fail "nginx: deploy status not served"
+headers=$(https -s -o /dev/null -D - "$status_url" | tr -d '\r')
+for h in "Cache-Control: no-cache" "X-Frame-Options: DENY" "X-Content-Type-Options: nosniff"; do
+	echo "$headers" | grep -qx "$h" || fail "nginx: deploy status lacks '$h'"
+done
+https "https://homeserver.lan:$HTTPS_PORT/" | grep -q 'id="server-status"' || fail "nginx: dashboard has no server status panel"
 echo "nginx: ok"
 
 # --- auth -------------------------------------------------------------------

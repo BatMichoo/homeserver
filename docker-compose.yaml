@@ -28,6 +28,8 @@ services:
       - ./nginx/templates:/etc/nginx/templates:ro
       - ${CERTS_DIR:-./nginx/certs}:/etc/nginx/certs:ro
       - ./www/html:/var/www/html:ro
+      # The deployer's status.json, for the dashboard.
+      - ${DEPLOY_PUBLIC_DIR:-./.deploy/public}:/var/www/deploy:ro
     restart: unless-stopped
     depends_on:
       certs:
@@ -115,6 +117,29 @@ services:
       db-setup:
         condition: service_completed_successfully
     restart: unless-stopped
+
+  # Opt-in: start with `make autodeploy`. Deploys main once CI passes, per
+  # service where it can (see deploy/ and the README). The checkout is
+  # mounted at its host path so compose's relative paths resolve the same
+  # inside and outside.
+  deployer:
+    profiles: [autodeploy]
+    build:
+      context: ./deploy
+    restart: unless-stopped
+    user: "${AUTODEPLOY_UID:-1000}:${AUTODEPLOY_GID:-1000}"
+    group_add:
+      - "${DOCKER_GID:-999}"
+    working_dir: ${AUTODEPLOY_DIR:-/autodeploy-dir-unset}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${AUTODEPLOY_DIR:-/autodeploy-dir-unset}:${AUTODEPLOY_DIR:-/autodeploy-dir-unset}
+    environment:
+      DEPLOY_REPO: ${DEPLOY_REPO:-BatMichoo/homeserver}
+      DEPLOY_BRANCH: ${DEPLOY_BRANCH:-main}
+      DEPLOY_INTERVAL: ${DEPLOY_INTERVAL:-30m}
+      DEPLOY_BACKUP_KEEP: ${DEPLOY_BACKUP_KEEP:-14}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
 
 volumes:
   # The home server's databases (back them up!).

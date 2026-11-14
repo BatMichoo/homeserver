@@ -52,6 +52,10 @@
       .empty {
         color: var(--text-muted);
       }
+      .held {
+        margin: 0.5rem 0 0.5rem 1.2rem;
+        color: var(--danger);
+      }
     </style>
     <title>Home server</title>
   </head>
@@ -134,6 +138,13 @@
             <div id="date" class="clock-date">&nbsp;</div>
           </div>
 
+          <section class="card" id="server-status">
+            <h2>Server</h2>
+            <p class="empty" id="server-summary">No deploys yet.</p>
+            <ul class="held" id="server-held" hidden></ul>
+            <p class="empty" id="server-cert" hidden></p>
+          </section>
+
           <section class="card">
             <h2>Services</h2>
             <p class="empty">No services yet. Apps show up here as they're added.</p>
@@ -174,6 +185,66 @@
       setInterval(updateClock, 1000);
       document.getElementById("year").textContent = new Date().getFullYear();
       document.getElementById("address").textContent = location.host;
+
+      // Server panel: the deployer's status (deploy/), refreshed every minute.
+      const results = {
+        deployed: "Deployed",
+        partial: "Deployed, with services held back",
+        "rolled-back": "Rolled back",
+        "ci-failed": "Skipped (CI failed)",
+        blocked: "Waiting (checkout can't be updated)",
+        "backup-failed": "Waiting (backup failed)",
+      };
+
+      function ago(iso) {
+        const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+        if (minutes < 1) return "just now";
+        if (minutes < 60) return minutes + " min ago";
+        const hours = Math.round(minutes / 60);
+        if (hours < 48) return hours + " h ago";
+        return Math.round(hours / 24) + " days ago";
+      }
+
+      async function updateServer() {
+        const summary = document.getElementById("server-summary");
+        const held = document.getElementById("server-held");
+        const cert = document.getElementById("server-cert");
+        let status;
+        try {
+          const response = await fetch("/deploy/status.json", { cache: "no-store" });
+          if (!response.ok) throw new Error(response.status);
+          status = await response.json();
+          if (status.version !== 1) throw new Error("unknown status version");
+        } catch {
+          summary.textContent = "No deploys yet.";
+          held.hidden = true;
+          cert.hidden = true;
+          return;
+        }
+        const d = status.deployed || {};
+        const result = results[status.last_result] || status.last_result || "";
+        summary.textContent = d.commit
+          ? result + ": “" + d.subject + "” (" + d.commit.slice(0, 7) + ", " + ago(d.at) + ")"
+          : result || "No deploys yet.";
+
+        held.replaceChildren();
+        for (const h of status.held || []) {
+          const item = document.createElement("li");
+          item.textContent = h.service + " is held on its previous version: " + h.reason;
+          held.append(item);
+        }
+        held.hidden = held.children.length === 0;
+
+        if (status.cert_expiry) {
+          cert.textContent =
+            "Certificate valid until " + new Date(status.cert_expiry).toLocaleDateString() + ".";
+          cert.hidden = false;
+        } else {
+          cert.hidden = true;
+        }
+      }
+      updateServer();
+      setInterval(updateServer, 60000);
     </script>
   </body>
 </html>

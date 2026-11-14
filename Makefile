@@ -3,8 +3,11 @@
 
 SHELLCHECK := $(shell command -v shellcheck 2>/dev/null || echo docker run --rm -v "$(CURDIR)":/mnt -w /mnt koalaman/shellcheck-alpine:v0.10.0 shellcheck)
 
-# How to run compose (make smoke points it at a throwaway project).
-COMPOSE ?= docker compose
+# How to run compose (make smoke points it at a throwaway project). When
+# the deployer holds services on their previous version, its override file
+# is included, so `make up` doesn't start a held-back version.
+OVERRIDE := .deploy/override.yaml
+COMPOSE ?= docker compose $(if $(wildcard $(OVERRIDE)),-f docker-compose.yaml -f $(OVERRIDE))
 
 # Where the certificate goes (compose reads CERTS_DIR too). Created here
 # rather than by Docker, so it belongs to you and make clean can empty it.
@@ -15,7 +18,8 @@ CRT_FILE := $(CERT_FOLDER)/homeserver.lan.crt
 # reload_nginx makes a running nginx load the certificate from disk.
 reload_nginx = if [ -n "$$($(COMPOSE) ps -q --status running nginx)" ]; then $(COMPOSE) exec -T nginx nginx -s reload; fi
 
-.PHONY: up down check test smoke theme certs renew-certs ca-backup ca-restore clean
+.PHONY: up down check test smoke theme certs renew-certs ca-backup ca-restore clean \
+	autodeploy autodeploy-stop autodeploy-logs deploy-e2e
 
 # The shared look (github.com/BatMichoo/theme) the dashboard uses. Its files
 # are copied into www/html/theme/ and committed; `make theme` refreshes them
@@ -25,7 +29,7 @@ THEME_FILES := css/tokens.css css/theme.css css/mobile.css css/tablet.css js/the
 
 # up starts everything (issuing the certificate first if needed).
 up:
-	@mkdir -p $(CERT_FOLDER)
+	@mkdir -p $(CERT_FOLDER) .deploy/public
 	$(COMPOSE) up -d --build
 
 down:
@@ -65,6 +69,11 @@ test:
 	@trap 'docker stop $(TEST_DB) >/dev/null' EXIT; \
 	for i in $$(seq 30); do docker exec $(TEST_DB) pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1 && break; sleep 1; done; \
 	cd auth && TEST_DATABASE_URL='postgres://postgres:test@127.0.0.1:55433/postgres?sslmode=disable' go test -race -count=1 ./...
+	cd deploy && go test -race -count=1 ./...
+
+# deploy-e2e runs the deployer for real on a small fixture project.
+deploy-e2e:
+	scripts/deploy-e2e.sh
 
 # theme copies the theme's files at THEME_VERSION into www/html/theme/.
 theme:
@@ -114,3 +123,18 @@ ca-restore:
 clean:
 	@rm -f $(KEY_FILE) $(CRT_FILE)
 	@echo "Removed the server certificate."
+
+# --- Auto-deploy: deploy main once CI passes (see deploy/ and the README) ---
+AUTODEPLOY_ENV := AUTODEPLOY_DIR=$(CURDIR) \
+	AUTODEPLOY_UID=$$(id -u) AUTODEPLOY_GID=$$(id -g) \
+	DOCKER_GID=$$(stat -c %g /var/run/docker.sock)
+
+autodeploy:
+	@mkdir -p .deploy/public
+	$(AUTODEPLOY_ENV) docker compose --profile autodeploy up -d --build deployer
+
+autodeploy-stop:
+	$(AUTODEPLOY_ENV) docker compose --profile autodeploy stop deployer
+
+autodeploy-logs:
+	docker compose --profile autodeploy logs -f deployer

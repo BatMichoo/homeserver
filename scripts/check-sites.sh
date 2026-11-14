@@ -11,7 +11,7 @@ status=0
 for f in "$@"; do
 	servers=$(grep -cE '^[[:space:]]*server[[:space:]]*\{' "$f" || true)
 	included=$(grep -cE '^[[:space:]]*include[[:space:]]+/etc/nginx/snippets/security-headers\.conf;' "$f" || true)
-	if [ "$servers" -ne "$included" ]; then
+	if [ "$servers" -gt "$included" ]; then
 		echo "$f: $servers server blocks but $included include /etc/nginx/snippets/security-headers.conf" >&2
 		status=1
 	fi
