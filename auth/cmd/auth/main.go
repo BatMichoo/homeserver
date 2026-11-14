@@ -92,20 +92,29 @@ func serve(ctx context.Context, cfg *config.Config, database *db.DB, acc *accoun
 	return 0
 }
 
-// sweep deletes expired sessions every hour.
+// sweep deletes expired sessions every hour, and forgets old failed
+// logins every minute.
 func sweep(ctx context.Context, acc *accounts.Service) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
-	for {
+	prune := time.NewTicker(time.Minute)
+	defer prune.Stop()
+	sweepSessions := func() {
 		if n, err := acc.Sweep(ctx); err != nil {
 			log.Printf("sweep sessions: %v", err)
 		} else if n > 0 {
 			log.Printf("removed %d expired sessions", n)
 		}
+	}
+	sweepSessions()
+	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-prune.C:
+			acc.PruneThrottle()
 		case <-t.C:
+			sweepSessions()
 		}
 	}
 }

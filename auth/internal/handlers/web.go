@@ -52,7 +52,7 @@ func NewWebRouter(d Deps) (*gin.Engine, error) {
 	r := NewRouter(d)
 	r.Use(OriginCheck(d.LanDomain))
 	r.GET(theme.DefaultPrefix+"/*file", gin.WrapH(http.StripPrefix(theme.DefaultPrefix, theme.Handler())))
-	r.GET("/static/auth/*file", gin.WrapH(http.StripPrefix("/static/auth", http.FileServer(http.FS(static.FS)))))
+	r.GET("/static/auth/*file", gin.WrapH(http.StripPrefix("/static/auth", filesOnly(http.FS(static.FS)))))
 
 	r.GET("/", func(c *gin.Context) { c.Redirect(http.StatusSeeOther, "/account") })
 	r.GET("/login", h.getLogin)
@@ -78,21 +78,29 @@ func lang(c *gin.Context) string {
 // session is the logged-in user and their token, or nil. A session whose
 // expiry moved forward gets its cookie refreshed.
 func (h *web) session(c *gin.Context) (*accounts.User, string) {
+	u, token, _ := h.sessionErr(c)
+	return u, token
+}
+
+// sessionErr is session, plus an error when the session couldn't be
+// checked (database trouble), as opposed to there being none.
+func (h *web) sessionErr(c *gin.Context) (*accounts.User, string, error) {
 	token, err := c.Cookie(SessionCookie)
 	if err != nil || token == "" {
-		return nil, ""
+		return nil, "", nil
 	}
 	u, renewed, err := h.acc.Verify(c.Request.Context(), token)
+	if errors.Is(err, accounts.ErrNoSession) {
+		return nil, "", nil
+	}
 	if err != nil {
-		if !errors.Is(err, accounts.ErrNoSession) {
-			log.Printf("verify session: %v", err)
-		}
-		return nil, ""
+		log.Printf("verify session: %v", err)
+		return nil, "", err
 	}
 	if !renewed.IsZero() {
 		h.setSessionCookie(c, token, int(h.acc.TTL().Seconds()))
 	}
-	return &u, token
+	return &u, token, nil
 }
 
 func (h *web) setSessionCookie(c *gin.Context, token string, maxAge int) {
@@ -269,6 +277,9 @@ func (h *web) postPassword(c *gin.Context) {
 	h.account(c, func(u *accounts.User, token string) {
 		err := h.acc.ChangePassword(c.Request.Context(), u.ID, token,
 			c.PostForm("current_password"), c.PostForm("new_password"), c.PostForm("confirm_password"))
+		if errors.Is(err, accounts.ErrThrottled) {
+			err = &accounts.InputError{Key: "throttled"}
+		}
 		if errors.Is(err, accounts.ErrInvalidCredentials) {
 			err = &accounts.InputError{Key: "current_password"}
 		}
@@ -294,4 +305,23 @@ func (h *web) postLang(c *gin.Context) {
 		return
 	}
 	c.Redirect(http.StatusSeeOther, accounts.SafeNext(c.GetHeader("Referer"), h.lanDomain))
+}
+
+// filesOnly serves files from fsys, and 404 for directories (no listings).
+func filesOnly(fsys http.FileSystem) http.Handler {
+	files := http.FileServer(fsys)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, err := fsys.Open(r.URL.Path)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		info, err := f.Stat()
+		f.Close()
+		if err != nil || info.IsDir() {
+			http.NotFound(w, r)
+			return
+		}
+		files.ServeHTTP(w, r)
+	})
 }

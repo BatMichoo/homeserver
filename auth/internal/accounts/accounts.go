@@ -195,15 +195,23 @@ func (s *Service) UpdateProfile(ctx context.Context, userID, displayName, email 
 }
 
 // ChangePassword sets a new password after checking the current one, and
-// ends the user's other sessions.
+// ends the user's other sessions. Wrong current passwords are throttled
+// like logins (separately from them), so a stolen session can't be used
+// to guess it.
 func (s *Service) ChangePassword(ctx context.Context, userID, keepToken, current, next, confirm string) error {
+	key := "password-change:" + userID
+	if !s.throttle.Allow(key) {
+		return ErrThrottled
+	}
 	_, hash, err := s.store.UserByID(ctx, userID)
 	if err != nil {
 		return err
 	}
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(current)) != nil {
+		s.throttle.Fail(key)
 		return ErrInvalidCredentials
 	}
+	s.throttle.Reset(key)
 	if err := checkNewPassword(next, confirm); err != nil {
 		return err
 	}
@@ -246,6 +254,10 @@ func (s *Service) Sweep(ctx context.Context) (int64, error) {
 	s.throttle.Prune()
 	return s.store.DeleteExpiredSessions(ctx, s.now())
 }
+
+// PruneThrottle forgets failed logins older than the throttle's window
+// (main runs it every minute).
+func (s *Service) PruneThrottle() { s.throttle.Prune() }
 
 func checkNewPassword(password, confirm string) error {
 	if utf8.RuneCountInString(password) < minPassword {

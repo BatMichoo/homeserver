@@ -8,11 +8,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// verify is nginx's auth_request: 200 with the user in headers, or 401.
-// X-User-Name is percent-encoded UTF-8 (headers are ASCII-only); apps
-// decode it with url.QueryUnescape.
+// verify is nginx's auth_request: 200 with the user in headers, 401 when
+// there's no session, 503 when it can't be checked (nginx then shows an
+// error rather than sending everyone to log in). X-User-Name is
+// percent-encoded UTF-8 (headers are ASCII-only); apps decode it with
+// url.QueryUnescape.
 func (h *web) verify(c *gin.Context) {
-	u, _ := h.session(c)
+	u, _, err := h.sessionErr(c)
+	if err != nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
 	if u == nil {
 		c.AbortWithStatus(http.StatusUnauthorized)
 		return

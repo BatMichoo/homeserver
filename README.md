@@ -25,6 +25,13 @@ make up
 
 Open `https://<LAN_IP>/` once your device trusts the CA (below).
 
+### Upgrading an existing install
+
+The login service added Postgres. Before pulling it onto a server that
+already runs Homeserver, add `POSTGRES_PASSWORD` and `AUTH_DB_PASSWORD`
+to `.env` (see `.env.template`): without them `make up` stops at `db` or
+`db-setup`, and nginx isn't restarted with the new configuration.
+
 ### Moving from Expenser
 
 Expenser used to run nginx and the home CA itself. To keep the CA your
@@ -118,6 +125,11 @@ about every request, sends people without a session to the login page
 - `X-User-Name`: their display name, else username, percent-encoded
   UTF-8. Decode it with `url.QueryUnescape` (Go).
 
+The app also gets the request's cookies, minus the session token
+(`homeserver_session`), which only nginx and the auth service see. If
+the auth service can't reach its database, protected sites answer with
+an error (500) instead of sending people to log in.
+
 nginx replaces whatever the client sent in those headers, so the app can
 trust them, provided every location that proxies to it includes either
 `require-login.conf` (login needed) or `public.conf` (no login; the
@@ -163,11 +175,13 @@ repeated in the location. For htmx requests, a missing session answers `401` wit
 
 ## Adding an app's database
 
-Add its name to `db/apps` (e.g. `expenser`), add `EXPENSER_DB_PASSWORD`
+Add its name to `db/apps` (e.g. `expenser`; not `postgres`, `template0`,
+`template1` or `pg_…`), add `EXPENSER_DB_PASSWORD`
 to `.env` (and to `db-setup`'s environment in `docker-compose.yaml`),
 then `make up`. `db-setup` creates the database and role on the running
 server, and sets the password again on every `up`. Changing the
-password in `.env` is applied the same way.
+password in `.env` is applied the same way. Each app's role can only
+connect to its own database.
 
 ## Dashboard
 

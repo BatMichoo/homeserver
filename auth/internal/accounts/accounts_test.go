@@ -232,3 +232,19 @@ func TestProfileRules(t *testing.T) {
 
 // sqlStore lets tests look at the rows behind the store.
 type sqlStore interface{ DB() *sql.DB }
+
+// Guessing the current password with a stolen session is throttled like
+// logins.
+func TestChangePasswordThrottled(t *testing.T) {
+	s, c := newService(t)
+	u, _ := s.Register(ctx, "ivan", "secret1", "secret1")
+	keep, _, _ := s.StartSession(ctx, u.ID, "")
+	for i := 0; i < 5; i++ {
+		assert.ErrorIs(t, s.ChangePassword(ctx, u.ID, keep, "wrong", "secret2", "secret2"), ErrInvalidCredentials)
+	}
+	assert.ErrorIs(t, s.ChangePassword(ctx, u.ID, keep, "secret1", "secret2", "secret2"), ErrThrottled)
+	c.add(time.Second)
+	assert.NoError(t, s.ChangePassword(ctx, u.ID, keep, "secret1", "secret2", "secret2"))
+	_, err := s.Login(ctx, "ivan", "secret2")
+	assert.NoError(t, err, "a login throttle is separate")
+}

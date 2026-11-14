@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/BatMichoo/homeserver/auth/internal/accounts"
+	"github.com/BatMichoo/homeserver/auth/internal/db"
 	"github.com/BatMichoo/homeserver/auth/internal/db/dbtest"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/gin-gonic/gin"
@@ -20,9 +21,10 @@ import (
 const origin = "https://auth.homeserver.lan"
 
 type server struct {
-	t   *testing.T
-	r   *gin.Engine
-	acc *accounts.Service
+	t     *testing.T
+	r     *gin.Engine
+	acc   *accounts.Service
+	store *db.DB
 }
 
 func newServer(t *testing.T) *server {
@@ -31,7 +33,7 @@ func newServer(t *testing.T) *server {
 	acc := accounts.New(store, 720*time.Hour)
 	r, err := NewWebRouter(Deps{DB: store, Accounts: acc, LanDomain: "homeserver.lan", PublicURL: origin})
 	require.NoError(t, err)
-	return &server{t: t, r: r, acc: acc}
+	return &server{t: t, r: r, acc: acc, store: store}
 }
 
 // do sends a request; form values make it a POST with Origin set.
@@ -285,4 +287,20 @@ func TestLoginThrottledShowsMessage(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, w.Code)
 	assert.Contains(t, doc(t, w).Find(".form-error").Text(), "Wait a few seconds")
 	assert.Nil(t, cookie(w, "homeserver_session"))
+}
+
+// A database outage isn't "logged out": /verify answers 503, so nginx
+// shows an error instead of bouncing everyone to a broken login page.
+func TestVerifyDatabaseDown(t *testing.T) {
+	s := newServer(t)
+	c := s.register("ivan")
+	require.NoError(t, s.store.SQL.Close())
+	assert.Equal(t, http.StatusServiceUnavailable, s.do("GET", "/verify", nil, nil, c).Code)
+	assert.Equal(t, http.StatusUnauthorized, s.do("GET", "/verify", nil, nil).Code, "no cookie is still 401")
+}
+
+func TestStaticNoListing(t *testing.T) {
+	s := newServer(t)
+	assert.Equal(t, 404, s.do("GET", "/static/auth/", nil, nil).Code)
+	assert.Equal(t, 200, s.do("GET", "/static/auth/auth.css", nil, nil).Code)
 }

@@ -100,6 +100,23 @@ sed 's/^AUTH_DB_PASSWORD=.*/AUTH_DB_PASSWORD=/' "$tmp/env" >"$tmp/env-no-pw"
 if docker compose -p "$project" $files --env-file "$tmp/env-no-pw" run --rm db-setup >/dev/null 2>&1; then
 	fail "db: db-setup ran without AUTH_DB_PASSWORD"
 fi
+
+# An apps list whose last line has no newline still counts; reserved names
+# are refused; one app's role can't connect to another app's database.
+printf 'auth\nsmokeapp' >"$tmp/apps"
+setup_with() {
+	compose run --rm -T -v "$tmp/apps:/tmp/apps:ro" -e APPS_FILE=/tmp/apps \
+		-e SMOKEAPP_DB_PASSWORD=smoke-app -e POSTGRES_DB_PASSWORD=x db-setup 2>&1
+}
+out=$(setup_with) || fail "db: db-setup with a second app failed: $out"
+echo "$out" | grep -q 'created smokeapp' || fail "db: last line without newline skipped: $out"
+if compose run --rm -T --no-deps -e PGPASSWORD=smoke-auth-2 --entrypoint psql db-setup \
+	-h db -U auth -d smokeapp -tAc 'select 1' >/dev/null 2>&1; then
+	fail "db: the auth role can connect to another app's database"
+fi
+printf 'auth\npostgres\n' >"$tmp/apps"
+if out=$(setup_with); then fail "db: reserved name accepted: $out"; fi
+echo "$out" | grep -q postgres || fail "db: no message about the reserved name: $out"
 echo "db: ok"
 
 # --- nginx ---------------------------------------------------------------
@@ -162,8 +179,9 @@ echo "nginx: ok"
 # --- auth -------------------------------------------------------------------
 auth_url="https://auth.homeserver.lan:$HTTPS_PORT"
 authc() { curl -s --cacert "$ca" --resolve "auth.homeserver.lan:$HTTPS_PORT:127.0.0.1" "$@"; }
-[ "$(authc "$auth_url/healthz")" = ok ] || fail "auth: /healthz"
-for p in /verify /redirect-to-login; do
+# The health check is for the deployer (inside the network), not the LAN.
+[ "$(compose exec -T auth wget -qO- http://127.0.0.1:8080/healthz)" = ok ] || fail "auth: /healthz"
+for p in /verify /redirect-to-login /healthz; do
 	[ "$(authc -o /dev/null -w '%{http_code}' "$auth_url$p")" = 404 ] || fail "auth: $p reachable from outside"
 done
 echo "auth: up"
@@ -199,6 +217,16 @@ echo "$id" | grep -Eq '^[0-9a-f-]{36}$' || fail "auth: whoami got no user id ($b
 
 post -d display_name=Иван -d email= "$auth_url/account" >/dev/null
 [ "$(whoc -b "$jar" "$who/")" = "$id|%D0%98%D0%B2%D0%B0%D0%BD" ] || fail "auth: display name not passed encoded"
+
+# The app gets the request's cookies minus the session token.
+token=$(awk '$6 == "homeserver_session" {print $7}' "$jar")
+[ -n "$token" ] || fail "auth: no session cookie in the jar"
+cookies=$(whoc -H "Cookie: a=1; homeserver_session=$token; homeserver_lang=bg" "$who/cookies")
+[ "$cookies" = "a=1; homeserver_lang=bg" ] || fail "auth: app got cookies '$cookies'"
+
+# nginx finds the auth service again after it's recreated.
+compose up -d --force-recreate --no-deps --wait auth >/dev/null 2>&1 || fail "auth: recreate failed"
+[ "$(whoc -b "$jar" "$who/")" = "$id|%D0%98%D0%B2%D0%B0%D0%BD" ] || fail "auth: protected site broken after auth was recreated"
 
 headers=$(whoc -b "$jar" -s -o /dev/null -D - "$who/" | tr -d '\r')
 for hdr in "X-Frame-Options: DENY" "X-Content-Type-Options: nosniff" "X-XSS-Protection: 1; mode=block"; do
