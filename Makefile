@@ -37,8 +37,10 @@ check:
 	$(SHELLCHECK) certs/issue-certs.sh db/setup.sh scripts/*.sh
 	docker compose --env-file .env.template config -q
 	scripts/check-sites.sh nginx/sites/*.conf scripts/smoke/whoami.conf
-	@test -z "$$(gofmt -l auth)" || { gofmt -l auth; echo "run gofmt on the files above"; exit 1; }
+	@test -z "$$(gofmt -l auth deploy)" || { gofmt -l auth deploy; echo "run gofmt on the files above"; exit 1; }
 	cd auth && go vet ./...
+	cd deploy && go vet ./...
+	docker compose --env-file .env.template config --format json | (cd deploy && go run ./cmd/deploy lint --project-dir "$(CURDIR)")
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
 	openssl req -x509 -newkey rsa:2048 -noenc -days 1 -subj /CN=check \
 		-keyout "$$tmp/homeserver.lan.key" -out "$$tmp/homeserver.lan.crt" 2>/dev/null && \

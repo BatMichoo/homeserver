@@ -5,3 +5,5 @@ ca-backup.tgz
 *.crt
 docs/
 .superpowers/
+.deploy/
+backups/

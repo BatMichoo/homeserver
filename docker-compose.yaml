@@ -3,6 +3,18 @@ name: homeserver
 services:
   nginx:
     image: nginx:stable-alpine
+    labels:
+      # For the deployer (deploy/): check a new config, apply a config
+      # change without restarting, and read the certificate's expiry here.
+      homeserver.check: "nginx -t"
+      homeserver.reload: "nginx -s reload"
+      homeserver.tls: "443"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/rootCA.crt"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     environment:
       HTTPS_PORT: ${HTTPS_PORT:-443}
     ports:
@@ -29,6 +41,9 @@ services:
   certs:
     build:
       context: ./certs
+    labels:
+      # The deployer runs it this often (certificate renewal check).
+      homeserver.every: "720h"
     environment:
       COUNTRY_ISO: ${COUNTRY_ISO:-}
       PROVINCE: ${PROVINCE:-}
@@ -47,6 +62,9 @@ services:
   # role, made by db-setup.
   db:
     image: postgres:16-alpine
+    labels:
+      # The deployer dumps its databases before every deploy.
+      homeserver.backup: postgres
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
     volumes:
@@ -79,6 +97,12 @@ services:
   auth:
     build:
       context: ./auth
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     environment:
       DB_HOST: db
       DB_NAME: auth
