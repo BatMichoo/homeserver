@@ -8,7 +8,6 @@ cd "$(dirname "$0")/.."
 project=homeserver-smoke
 tmp=$(mktemp -d)
 export CERTS_DIR="$tmp/certs" HTTP_PORT=18080 HTTPS_PORT=18443
-mkdir -p "$CERTS_DIR"
 
 cat >"$tmp/env" <<ENV
 COUNTRY_ISO=BG
@@ -22,6 +21,7 @@ CERTS_GID=$(id -g)
 ENV
 
 compose() { docker compose -p "$project" --env-file "$tmp/env" "$@"; }
+mk() { make -s "$@" COMPOSE="docker compose -p $project --env-file $tmp/env" >/dev/null 2>&1; }
 
 cleanup() {
 	compose down -v --remove-orphans >/dev/null 2>&1 || true
@@ -35,7 +35,10 @@ fail() {
 }
 
 # --- certs ---------------------------------------------------------------
-compose run --rm --build certs >/dev/null 2>&1 || fail "certs: first run failed"
+# make certs creates the certificate folder itself, owned by this user (if
+# Docker created it, it would be root's and make clean couldn't empty it).
+mk certs || fail "certs: first run failed"
+[ "$(stat -c %u "$CERTS_DIR")" = "$(id -u)" ] || fail "certs: $CERTS_DIR not owned by $(id -u)"
 for f in homeserver.lan.crt homeserver.lan.key rootCA.crt; do
 	[ -s "$CERTS_DIR/$f" ] || fail "certs: $f missing"
 done
@@ -83,4 +86,13 @@ https "https://homeserver.lan:$HTTPS_PORT/" | grep -q '</html>' || fail "nginx: 
 	fail "nginx: dashboard not served by IP"
 [ "$(https -o /dev/null -w '%{http_code}' "https://homeserver.lan:$HTTPS_PORT/nope")" = 404 ] ||
 	fail "nginx: unknown path is not 404"
+
+# make certs also reloads nginx, so a certificate renewed on disk is served.
+serial() { openssl x509 -noout -serial; }
+compose run --rm -e FORCE=1 certs >/dev/null 2>&1 || fail "certs: forced reissue failed"
+mk certs || fail "nginx: make certs failed"
+sleep 1 # nginx reloads its workers in the background
+served=$(echo | openssl s_client -connect "127.0.0.1:$HTTPS_PORT" -servername homeserver.lan 2>/dev/null | serial)
+[ "$served" = "$(serial <"$CERTS_DIR/homeserver.lan.crt")" ] ||
+	fail "nginx: still serving the old certificate after make certs ($served)"
 echo "nginx: ok"

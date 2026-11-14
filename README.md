@@ -21,6 +21,23 @@ make up
 
 Open `https://<LAN_IP>/` once your device trusts the CA (below).
 
+### Moving from Expenser
+
+Expenser used to run nginx and the home CA itself. To keep the CA your
+devices already trust, bring it over before the first `make up` here:
+
+1. In the Expenser checkout: `make ca-backup` (writes `ca-backup.tgz`).
+2. Copy `ca-backup.tgz` into this folder and run `make ca-restore`.
+3. Stop Expenser's stack (`docker compose down` there) if it runs on this
+   machine: its nginx holds ports 80 and 443.
+4. `make up`.
+
+Skip step 1 and 2 to start with a new CA instead; every device then has to
+trust it once.
+
+If `make up` stops at the certs service, `docker compose logs certs` says
+why (usually a missing `LAN_DOMAIN` or `LAN_IP`).
+
 ## Settings (`.env`)
 
 | Variable | What it is | Example |
@@ -54,8 +71,9 @@ Renewals don't need this again; only a new CA does.
 - `make ca-backup` / `make ca-restore`: save the CA to `ca-backup.tgz` and put it back, for example on a new server. Keep the backup private: the CA's key can sign a certificate for any website, and your devices would believe it. If the CA is lost, every device has to trust a new one.
 
 Until the auto-deployer is added, nothing checks the certificate on its
-own: run `make certs` now and then (it does nothing if the certificate is
-still good for more than 45 days).
+own: run `make certs` now and then. It issues a new certificate only when
+the current one expires within 45 days (or no longer matches `.env`), and
+has nginx load it.
 
 ## Adding a site
 
