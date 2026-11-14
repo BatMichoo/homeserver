@@ -37,5 +37,6 @@
   "error.current_password": "Your current password is wrong.",
   "error.display_name_long": "Display names are at most 60 characters.",
   "error.email_invalid": "That isn't an email address.",
-  "error.generic": "Something went wrong. Try again."
+  "error.generic": "Something went wrong. Try again.",
+  "error.throttled": "Too many wrong tries. Wait a few seconds and try again."
 }

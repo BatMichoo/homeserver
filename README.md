@@ -97,7 +97,9 @@ everywhere else"). Anyone who can reach it can create an account.
 - **Language and theme:** `homeserver_lang` (`en`/`bg`) and
   `homeserver_theme` (`light`/`dark`) cookies, shared by every app.
 - **Too many wrong passwords:** after 5 failures for one username in 15
-  minutes, each further try waits 1s, 2s, 4s… up to 30s.
+  minutes, the next try is accepted only 1s after the last failure, then
+  2s, 4s… up to 30s. Tries inside that wait are refused ("too many
+  tries"), parallel ones included.
 - **Forgotten password:** there's no email reset. On the server:
 
   ```sh
@@ -117,8 +119,12 @@ about every request, sends people without a session to the login page
   UTF-8. Decode it with `url.QueryUnescape` (Go).
 
 nginx replaces whatever the client sent in those headers, so the app can
-trust them. That also means the app must only be reachable through
-nginx: no published port.
+trust them, provided every location that proxies to it includes either
+`require-login.conf` (login needed) or `public.conf` (no login; the
+headers arrive empty). nginx inherits `proxy_set_header` only into blocks
+that set none of their own, so a location, nested ones included, that
+includes neither would pass the client's headers through. The app must
+also be reachable only through nginx: no published port.
 
 A site file for an app (in `nginx/sites/`):
 
@@ -140,8 +146,19 @@ server {
 }
 ```
 
-Put `require-login.conf` after the location's own `proxy_set_header`
-lines. For htmx requests, a missing session answers `401` with
+A part of the app open without login gets its own location:
+
+```nginx
+    location /public/ {
+        proxy_set_header Host $host;
+        include /etc/nginx/snippets/public.conf;
+        proxy_pass http://expenser:8080;
+    }
+```
+
+`require-login.conf` sets its own `add_header`, so headers the site adds at
+server level (other than the security headers, which it re-adds) must be
+repeated in the location. For htmx requests, a missing session answers `401` with
 `HX-Redirect`, so htmx loads the login page as a whole page.
 
 ## Adding an app's database

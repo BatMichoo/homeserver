@@ -6,14 +6,15 @@ import (
 )
 
 const (
-	throttleFree   = 5                // failures before any wait
+	throttleFree   = 5                // failures before any backoff
 	throttleWindow = 15 * time.Minute // failures older than this are forgotten
 	throttleMax    = 30 * time.Second
 )
 
 // Throttle slows down guessing: after 5 failed logins for a username
-// within 15 minutes, each further try waits 1s, 2s, 4s… up to 30s. It lives
-// in memory (the service runs as one instance).
+// within 15 minutes, the next try is allowed only 1s after the last
+// failure, then 2s, 4s… up to 30s. A try reserves its slot, so parallel
+// attempts can't share one. It lives in memory (one instance).
 type Throttle struct {
 	mu      sync.Mutex
 	entries map[string]throttleEntry
@@ -22,12 +23,25 @@ type Throttle struct {
 
 type throttleEntry struct {
 	failures int
-	last     time.Time
+	last     time.Time // last failure
+	until    time.Time // no try before this
 }
 
 // NewThrottle makes a throttle reading the time from now.
 func NewThrottle(now func() time.Time) *Throttle {
 	return &Throttle{entries: map[string]throttleEntry{}, now: now}
+}
+
+// backoff is the wait after f failures.
+func backoff(f int) time.Duration {
+	over := f - throttleFree
+	switch {
+	case over < 0:
+		return 0
+	case over >= 5:
+		return throttleMax
+	}
+	return min(time.Second<<over, throttleMax)
 }
 
 // current returns username's entry, dropping it if it's too old. Callers
@@ -41,27 +55,33 @@ func (t *Throttle) current(username string) throttleEntry {
 	return e
 }
 
-// Delay is how long to wait before checking a login for username.
-func (t *Throttle) Delay(username string) time.Duration {
+// Allow reports whether a login for username may be checked now. Once
+// backoff applies, an allowed try holds the slot until its result (Fail
+// or Reset), so simultaneous tries are refused.
+func (t *Throttle) Allow(username string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	over := t.current(username).failures - throttleFree
-	if over < 0 {
-		return 0
+	now := t.now()
+	e := t.current(username)
+	if now.Before(e.until) {
+		return false
 	}
-	if over >= 5 {
-		return throttleMax
+	if d := backoff(e.failures); d > 0 {
+		e.until = now.Add(d)
+		t.entries[username] = e
 	}
-	return min(time.Second<<over, throttleMax)
+	return true
 }
 
 // Fail records a failed login.
 func (t *Throttle) Fail(username string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	now := t.now()
 	e := t.current(username)
 	e.failures++
-	e.last = t.now()
+	e.last = now
+	e.until = now.Add(backoff(e.failures))
 	t.entries[username] = e
 }
 

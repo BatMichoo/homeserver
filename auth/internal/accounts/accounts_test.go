@@ -22,7 +22,6 @@ func newService(t *testing.T) (*Service, *clock) {
 	s := New(dbtest.New(t), ttl)
 	s.now = c.now
 	s.throttle = NewThrottle(c.now)
-	s.sleep = func(time.Duration) {}
 	return s, c
 }
 
@@ -63,18 +62,30 @@ func TestLoginWrongPasswordAndUnknownUser(t *testing.T) {
 }
 
 func TestLoginThrottles(t *testing.T) {
-	s, _ := newService(t)
-	var slept []time.Duration
-	s.sleep = func(d time.Duration) { slept = append(slept, d) }
+	s, c := newService(t)
 	_, err := s.Register(ctx, "ivan", "secret1", "secret1")
 	require.NoError(t, err)
-	for i := 0; i < 6; i++ {
-		_, _ = s.Login(ctx, "ivan", "wrong")
+	for i := 0; i < 5; i++ {
+		_, err = s.Login(ctx, "ivan", "wrong")
+		assert.ErrorIs(t, err, ErrInvalidCredentials)
 	}
 	_, err = s.Login(ctx, "ivan", "secret1")
+	assert.ErrorIs(t, err, ErrThrottled, "even the right password waits out the backoff")
+	c.add(time.Second)
+	_, err = s.Login(ctx, "ivan", "secret1")
 	require.NoError(t, err)
-	assert.Equal(t, []time.Duration{time.Second, 2 * time.Second}, slept, "waits before the 6th and 7th tries")
-	assert.Zero(t, s.throttle.Delay("ivan"), "success resets")
+	assert.True(t, s.throttle.Allow("ivan"), "success resets")
+}
+
+// Overlong usernames can't exist, are refused like a wrong password, and
+// aren't remembered (they'd only fill memory).
+func TestLoginLongUsernameNotTracked(t *testing.T) {
+	s, _ := newService(t)
+	for i := 0; i < 3; i++ {
+		_, err := s.Login(ctx, strings.Repeat("x", 51+i), "pw")
+		assert.ErrorIs(t, err, ErrInvalidCredentials)
+	}
+	assert.Zero(t, s.throttle.Len())
 }
 
 func TestPasswordHashIsBcryptDefaultCost(t *testing.T) {

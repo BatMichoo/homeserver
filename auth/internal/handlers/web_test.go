@@ -274,3 +274,15 @@ func TestThemeServed(t *testing.T) {
 	w := s.do("GET", "/static/theme/css/theme.css", nil, nil)
 	assert.Equal(t, 200, w.Code)
 }
+
+func TestLoginThrottledShowsMessage(t *testing.T) {
+	s := newServer(t)
+	s.register("ivan")
+	for i := 0; i < 5; i++ {
+		s.do("POST", "/login", url.Values{"username": {"ivan"}, "password": {"nope"}}, nil)
+	}
+	w := s.do("POST", "/login", url.Values{"username": {"ivan"}, "password": {"secret1"}}, nil)
+	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	assert.Contains(t, doc(t, w).Find(".form-error").Text(), "Wait a few seconds")
+	assert.Nil(t, cookie(w, "homeserver_session"))
+}

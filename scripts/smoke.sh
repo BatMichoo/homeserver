@@ -186,6 +186,10 @@ echo "$h" | grep -qix "HX-Redirect: $auth_url/login?next=https%3A%2F%2Fwhoami.ho
 [ "$(whoc -o /dev/null -w '%{http_code}' -H 'X-User-Id: forged' "$who/")" = 302 ] ||
 	fail "auth: a forged X-User-Id got through without a session"
 
+# A public location passes no user, whatever the client claims.
+r=$(whoc -H 'X-User-Id: forged' -H 'X-User-Name: forged' "$who/public/x")
+[ "$r" = "|" ] || fail "auth: forged user headers reached a public location ($r)"
+
 r=$(post -d username=smoke-user -d password=secret1 -d confirm_password=secret1 "$auth_url/register")
 [ "$r" = "303 $auth_url/account" ] || fail "auth: register ($r)"
 body=$(whoc -b "$jar" -H 'X-User-Id: forged' -H 'X-User-Name: forged' "$who/")

@@ -147,6 +147,8 @@ func errorText(l string, err error) string {
 		return i18n.T(l, "error.username_taken")
 	case errors.Is(err, accounts.ErrInvalidCredentials):
 		return i18n.T(l, "login.error")
+	case errors.Is(err, accounts.ErrThrottled):
+		return i18n.T(l, "error.throttled")
 	}
 	log.Printf("auth: %v", err)
 	return i18n.T(l, "error.generic")
@@ -165,9 +167,12 @@ func (h *web) postLogin(c *gin.Context) {
 	username, next := c.PostForm("username"), c.PostForm("next")
 	u, err := h.acc.Login(c.Request.Context(), username, c.PostForm("password"))
 	if err != nil {
-		status := http.StatusUnauthorized
-		if !errors.Is(err, accounts.ErrInvalidCredentials) {
-			status = http.StatusInternalServerError
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, accounts.ErrInvalidCredentials):
+			status = http.StatusUnauthorized
+		case errors.Is(err, accounts.ErrThrottled):
+			status = http.StatusTooManyRequests
 		}
 		h.render(c, status, "auth/login", "login.title", pageData{Lang: l, Next: next, Username: username, Error: errorText(l, err)})
 		return

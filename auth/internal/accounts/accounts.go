@@ -31,6 +31,7 @@ func (e *InputError) Is(target error) bool { return target == ErrInvalidInput }
 
 var (
 	ErrInvalidCredentials = errors.New("wrong username or password")
+	ErrThrottled          = errors.New("too many failed logins; try again shortly")
 	ErrInvalidInput       = errors.New("invalid input")
 	ErrUnknownUser        = model.ErrUnknownUser
 	ErrUsernameTaken      = model.ErrUsernameTaken
@@ -69,7 +70,6 @@ type Service struct {
 	ttl      time.Duration
 	throttle *Throttle
 	now      func() time.Time
-	sleep    func(time.Duration)
 }
 
 // New makes the service; sessions last ttl since their last use.
@@ -79,7 +79,6 @@ func New(store Store, ttl time.Duration) *Service {
 		ttl:      ttl,
 		throttle: NewThrottle(time.Now),
 		now:      time.Now,
-		sleep:    time.Sleep,
 	}
 }
 
@@ -102,13 +101,19 @@ func (s *Service) Register(ctx context.Context, username, password, confirm stri
 	return s.store.CreateUser(ctx, username, hash)
 }
 
-// Login checks a username and password. After repeated failures for a
-// username it waits first (see Throttle). Unknown usernames and wrong
-// passwords give the same error, and take as long.
+// Login checks a username and password. Unknown usernames and wrong
+// passwords give the same error, and take as long. After repeated
+// failures for a username, tries inside the backoff get ErrThrottled
+// without being checked (see Throttle).
 func (s *Service) Login(ctx context.Context, username, password string) (User, error) {
 	username = strings.TrimSpace(username)
-	if d := s.throttle.Delay(username); d > 0 {
-		s.sleep(d)
+	if utf8.RuneCountInString(username) > maxUsername {
+		// Can't exist; not tracked, so huge names can't fill memory.
+		_ = bcrypt.CompareHashAndPassword(dummyHash(), []byte(password))
+		return User{}, ErrInvalidCredentials
+	}
+	if !s.throttle.Allow(username) {
+		return User{}, ErrThrottled
 	}
 	u, hash, err := s.store.UserByUsername(ctx, username)
 	if errors.Is(err, ErrUnknownUser) {
