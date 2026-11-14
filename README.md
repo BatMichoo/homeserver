@@ -2,7 +2,7 @@
 
 The manager of the home server: the reverse proxy (nginx), the home
 certificate authority (CA) that gives every service a trusted HTTPS
-certificate, and soon the login service and the auto-deployer. Apps
+certificate, the login service, and soon the auto-deployer. Apps
 (Expenser, media) join later and know nothing about how they're hosted.
 
 Right now it runs:
@@ -10,7 +10,11 @@ Right now it runs:
 - **certs**: issues nginx's TLS certificate from a private home CA, then
   exits. Runs on every `docker compose up`, before nginx.
 - **nginx**: serves the dashboard over HTTPS, hands out the CA certificate
-  over HTTP, and redirects everything else on HTTP to HTTPS.
+  over HTTP, redirects everything else on HTTP to HTTPS, and asks the auth
+  service whether requests to protected sites are logged in.
+- **db** and **db-setup**: Postgres for the home server's services.
+  `db-setup` creates each service's database and role on every `up`.
+- **auth**: the login service at `https://auth.<LAN_DOMAIN>/`.
 
 ## Setup
 
@@ -49,6 +53,9 @@ why (usually a missing `LAN_DOMAIN` or `LAN_IP`).
 | `LAN_DOMAIN` | Domain the home server is reached at; apps live on its subdomains | `homeserver.lan` |
 | `LAN_IP` | This server's LAN IP | `192.168.1.123` |
 | `CERTS_UID`, `CERTS_GID` | Owner of the files in `nginx/certs` (default 1000) | `1000` |
+| `POSTGRES_PASSWORD` | Postgres superuser password (only `db-setup` uses it) | long random string |
+| `AUTH_DB_PASSWORD` | Password of the auth service's database role | long random string |
+| `SESSION_TTL` | How long a login lasts without use (default `720h`, at least `1h`) | `720h` |
 | `HTTP_PORT`, `HTTPS_PORT` | Ports nginx listens on (default 80 and 443); redirects keep a non-default HTTPS port | `8443` |
 
 ## TLS Certificate
@@ -75,6 +82,75 @@ Until the auto-deployer is added, nothing checks the certificate on its
 own: run `make certs` now and then. It issues a new certificate only when
 the current one expires within 45 days (or no longer matches `.env`), and
 has nginx load it.
+
+## Login (auth service)
+
+`https://auth.<LAN_DOMAIN>/` is where people create an account, log in,
+and manage their account (display name, email, password, "log out
+everywhere else"). Anyone who can reach it can create an account.
+
+- **Session:** logging in sets the cookie `homeserver_session` for
+  `LAN_DOMAIN` and all its subdomains, so one login covers every app. It
+  lasts `SESSION_TTL` (30 days) since it was last used. Only a hash of it
+  is stored, in the auth database. Changing your password logs you out
+  everywhere else.
+- **Language and theme:** `homeserver_lang` (`en`/`bg`) and
+  `homeserver_theme` (`light`/`dark`) cookies, shared by every app.
+- **Too many wrong passwords:** after 5 failures for one username in 15
+  minutes, each further try waits 1s, 2s, 4s… up to 30s.
+- **Forgotten password:** there's no email reset. On the server:
+
+  ```sh
+  docker compose exec auth auth reset-password <username>
+  ```
+
+  It prints a new password once and logs that user out everywhere.
+
+## Protecting a site
+
+An app behind login needs no login code: nginx asks the auth service
+about every request, sends people without a session to the login page
+(and back afterwards), and passes the user to the app in two headers:
+
+- `X-User-Id`: the user's UUID.
+- `X-User-Name`: their display name, else username, percent-encoded
+  UTF-8. Decode it with `url.QueryUnescape` (Go).
+
+nginx replaces whatever the client sent in those headers, so the app can
+trust them. That also means the app must only be reachable through
+nginx: no published port.
+
+A site file for an app (in `nginx/sites/`):
+
+```nginx
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name expenser.*;
+
+    include /etc/nginx/snippets/security-headers.conf;
+    include /etc/nginx/snippets/auth-server.conf;
+
+    location / {
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        include /etc/nginx/snippets/require-login.conf;
+        proxy_pass http://expenser:8080;
+    }
+}
+```
+
+Put `require-login.conf` after the location's own `proxy_set_header`
+lines. For htmx requests, a missing session answers `401` with
+`HX-Redirect`, so htmx loads the login page as a whole page.
+
+## Adding an app's database
+
+Add its name to `db/apps` (e.g. `expenser`), add `EXPENSER_DB_PASSWORD`
+to `.env` (and to `db-setup`'s environment in `docker-compose.yaml`),
+then `make up`. `db-setup` creates the database and role on the running
+server, and sets the password again on every `up`. Changing the
+password in `.env` is applied the same way.
 
 ## Dashboard
 
@@ -107,8 +183,13 @@ lines as soon as a block sets one. To redirect to HTTPS, use
 ## Checks
 
 - `make check`: lints the shell scripts, validates the compose file,
-  checks every site includes the security headers, and runs `nginx -t`
-  against a throwaway certificate.
+  checks every site includes the security headers, runs `gofmt` and
+  `go vet` on the auth service, and runs `nginx -t` against a throwaway
+  certificate.
+- `make test`: runs the auth service's Go tests against a throwaway
+  Postgres container.
 - `make smoke`: starts the whole stack under a throwaway project (its own
-  CA volume, certificate folder and ports 18080/18443), checks the
-  certificate and nginx's answers, then removes it all.
+  volumes, certificate folder and ports 18080/18443) with a test-only
+  protected site (`scripts/smoke/whoami.conf`). It checks the
+  certificate, the database setup, nginx's answers, and logging in end to
+  end, then removes it all.
