@@ -20,6 +20,8 @@ services:
     depends_on:
       certs:
         condition: service_completed_successfully
+      auth:
+        condition: service_started
 
   # Issues nginx's TLS certificate from a private home CA, then exits. Runs
   # on every `up` (nginx waits for it) but only issues a new certificate when
@@ -72,6 +74,23 @@ services:
       db:
         condition: service_healthy
     restart: "no"
+
+  # The login service (auth/): auth.<LAN_DOMAIN>, and nginx's forward auth.
+  auth:
+    build:
+      context: ./auth
+    environment:
+      DB_HOST: db
+      DB_NAME: auth
+      DB_USER: auth
+      DB_PASS: ${AUTH_DB_PASSWORD:-}
+      LAN_DOMAIN: ${LAN_DOMAIN:-}
+      HTTPS_PORT: ${HTTPS_PORT:-443}
+      SESSION_TTL: ${SESSION_TTL:-720h}
+    depends_on:
+      db-setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
 volumes:
   # The home server's databases (back them up!).

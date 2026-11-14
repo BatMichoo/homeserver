@@ -15,7 +15,7 @@ CRT_FILE := $(CERT_FOLDER)/homeserver.lan.crt
 # reload_nginx makes a running nginx load the certificate from disk.
 reload_nginx = if [ -n "$$($(COMPOSE) ps -q --status running nginx)" ]; then $(COMPOSE) exec -T nginx nginx -s reload; fi
 
-.PHONY: up down check smoke theme certs renew-certs ca-backup ca-restore clean
+.PHONY: up down check test smoke theme certs renew-certs ca-backup ca-restore clean
 
 # The shared look (github.com/BatMichoo/theme) the dashboard uses. Its files
 # are copied into www/html/theme/ and committed; `make theme` refreshes them
@@ -37,6 +37,8 @@ check:
 	$(SHELLCHECK) certs/issue-certs.sh db/setup.sh scripts/*.sh
 	docker compose --env-file .env.template config -q
 	scripts/check-sites.sh
+	@test -z "$$(gofmt -l auth)" || { gofmt -l auth; echo "run gofmt on the files above"; exit 1; }
+	cd auth && go vet ./...
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
 	openssl req -x509 -newkey rsa:2048 -noenc -days 1 -subj /CN=check \
 		-keyout "$$tmp/homeserver.lan.key" -out "$$tmp/homeserver.lan.crt" 2>/dev/null && \
@@ -49,7 +51,18 @@ check:
 		-v "$(CURDIR)/nginx/templates:/etc/nginx/templates:ro" \
 		-e HTTPS_PORT=443 \
 		-v "$$tmp:/etc/nginx/certs:ro" \
+		--add-host auth:127.0.0.1 \
 		nginx:stable-alpine nginx -t
+
+# test runs the auth service's Go tests against a throwaway Postgres (the
+# container is started with --rm, so stopping it removes it).
+TEST_DB := homeserver-auth-test
+test:
+	@docker stop $(TEST_DB) >/dev/null 2>&1 || true
+	@docker run -d --rm --name $(TEST_DB) -e POSTGRES_PASSWORD=test -p 127.0.0.1:55433:5432 postgres:16-alpine >/dev/null
+	@trap 'docker stop $(TEST_DB) >/dev/null' EXIT; \
+	for i in $$(seq 30); do docker exec $(TEST_DB) pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1 && break; sleep 1; done; \
+	cd auth && TEST_DATABASE_URL='postgres://postgres:test@127.0.0.1:55433/postgres?sslmode=disable' go test -race -count=1 ./...
 
 # theme copies the theme's files at THEME_VERSION into www/html/theme/.
 theme:

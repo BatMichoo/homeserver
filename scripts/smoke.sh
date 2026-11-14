@@ -150,3 +150,12 @@ for url in "http://127.0.0.1:$HTTP_PORT/rootCA.crt" "http://127.0.0.1:$HTTP_PORT
 	done
 done
 echo "nginx: ok"
+
+# --- auth -------------------------------------------------------------------
+auth_url="https://auth.homeserver.lan:$HTTPS_PORT"
+authc() { curl -s --cacert "$ca" --resolve "auth.homeserver.lan:$HTTPS_PORT:127.0.0.1" "$@"; }
+[ "$(authc "$auth_url/healthz")" = ok ] || fail "auth: /healthz"
+for p in /verify /redirect-to-login; do
+	[ "$(authc -o /dev/null -w '%{http_code}' "$auth_url$p")" = 404 ] || fail "auth: $p reachable from outside"
+done
+echo "auth: up"
