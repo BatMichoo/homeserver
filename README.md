@@ -75,6 +75,14 @@ own: run `make certs` now and then. It issues a new certificate only when
 the current one expires within 45 days (or no longer matches `.env`), and
 has nginx load it.
 
+## Dashboard
+
+`www/html/index.html` is the page at `https://<LAN_IP>/`: clock, services
+(none yet) and how to trust the CA. It uses the shared theme
+([BatMichoo/theme](https://github.com/BatMichoo/theme)), whose files are
+copied into `www/html/theme/`. To move to a newer theme, change
+`THEME_VERSION` in the Makefile and run `make theme`.
+
 ## Adding a site
 
 Each site has its own file in `nginx/sites/`. `default.conf` handles

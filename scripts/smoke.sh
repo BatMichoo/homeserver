@@ -84,6 +84,16 @@ esac
 https "https://homeserver.lan:$HTTPS_PORT/" | grep -q '</html>' || fail "nginx: dashboard body"
 [ "$(curl -s --cacert "$ca" -o /dev/null -w '%{http_code}' "https://127.0.0.1:$HTTPS_PORT/")" = 200 ] ||
 	fail "nginx: dashboard not served by IP"
+# The dashboard uses the shared theme, served locally, and links no app yet.
+page=$(https "https://homeserver.lan:$HTTPS_PORT/")
+for f in css/tokens.css css/theme.css css/mobile.css css/tablet.css js/theme.js; do
+	echo "$page" | grep -q "/theme/$f" || fail "nginx: dashboard doesn't load theme/$f"
+	[ "$(https -o /dev/null -w '%{http_code}' "https://homeserver.lan:$HTTPS_PORT/theme/$f")" = 200 ] ||
+		fail "nginx: theme/$f not served"
+done
+echo "$page" | grep -q 'class="header-section"' || fail "nginx: dashboard has no theme header"
+if echo "$page" | grep -qi expenser; then fail "nginx: dashboard still mentions Expenser"; fi
+if echo "$page" | grep -Eq '(src|href)="https?://'; then fail "nginx: dashboard loads files from another site"; fi
 [ "$(https -o /dev/null -w '%{http_code}' "https://homeserver.lan:$HTTPS_PORT/nope")" = 404 ] ||
 	fail "nginx: unknown path is not 404"
 

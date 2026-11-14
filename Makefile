@@ -15,7 +15,13 @@ CRT_FILE := $(CERT_FOLDER)/homeserver.lan.crt
 # reload_nginx makes a running nginx load the certificate from disk.
 reload_nginx = if [ -n "$$($(COMPOSE) ps -q --status running nginx)" ]; then $(COMPOSE) exec -T nginx nginx -s reload; fi
 
-.PHONY: up down check smoke certs renew-certs ca-backup ca-restore clean
+.PHONY: up down check smoke theme certs renew-certs ca-backup ca-restore clean
+
+# The shared look (github.com/BatMichoo/theme) the dashboard uses. Its files
+# are copied into www/html/theme/ and committed; `make theme` refreshes them
+# after changing this version.
+THEME_VERSION := v0.1.0
+THEME_FILES := css/tokens.css css/theme.css css/mobile.css css/tablet.css js/theme.js
 
 # up starts everything (issuing the certificate first if needed).
 up:
@@ -40,6 +46,15 @@ check:
 		-v "$(CURDIR)/nginx/sites:/etc/nginx/sites:ro" \
 		-v "$$tmp:/etc/nginx/certs:ro" \
 		nginx:stable-alpine nginx -t
+
+# theme copies the theme's files at THEME_VERSION into www/html/theme/.
+theme:
+	@for f in $(THEME_FILES); do \
+		mkdir -p "www/html/theme/$$(dirname $$f)" && \
+		curl -fsSL "https://raw.githubusercontent.com/BatMichoo/theme/$(THEME_VERSION)/static/$$f" -o "www/html/theme/$$f" || exit 1; \
+	done
+	@echo "$(THEME_VERSION)" > www/html/theme/VERSION
+	@echo "Copied theme $(THEME_VERSION) into www/html/theme/."
 
 # smoke runs the whole stack under a throwaway project and checks it.
 smoke:
