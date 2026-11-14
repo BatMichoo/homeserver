@@ -30,6 +30,10 @@ const (
 	LabelTLS    = "homeserver.tls"    // read the certificate expiry from this port
 )
 
+// heldTag prefixes the tags that keep held services' images from being
+// pruned.
+const heldTag = "homeserver-held/"
+
 // Git is the checkout.
 type Git interface {
 	Branch(ctx context.Context) (string, error)
@@ -41,6 +45,7 @@ type Git interface {
 	FastForward(ctx context.Context, sha string) error
 	ResetKeep(ctx context.Context, sha string) error
 	SubmoduleUpdate(ctx context.Context) error
+	RemoveStray(ctx context.Context, paths []string) error
 	Subject(ctx context.Context, sha string) (string, error)
 }
 
@@ -49,6 +54,7 @@ type Compose interface {
 	Config(ctx context.Context) (compose.Project, error)
 	Build(ctx context.Context, svc string) error
 	Pull(ctx context.Context, svc string) error
+	PrepareAll(ctx context.Context) error
 	UpWait(ctx context.Context, svc string, recreate bool) error
 	UpAllWait(ctx context.Context) error
 	RunOnce(ctx context.Context, svc string) error
@@ -56,6 +62,8 @@ type Compose interface {
 	ImageID(ctx context.Context, svc string) (string, error)
 	Running(ctx context.Context, svc string) (bool, error)
 	Remove(ctx context.Context, svc string) error
+	Tag(ctx context.Context, image, ref string) error
+	Untag(ctx context.Context, ref string) error
 }
 
 // CI reports a commit's checks.
@@ -118,9 +126,29 @@ func (d *Deployer) blocked(msg string) error {
 	return d.save()
 }
 
+// safe reports why the checkout can't be used, or "" when it can.
+func (d *Deployer) safe(ctx context.Context) (string, error) {
+	branch, err := d.Git.Branch(ctx)
+	if err != nil {
+		return "", err
+	}
+	if branch != d.Cfg.Branch {
+		return fmt.Sprintf("checkout is on %q, not %q", branch, d.Cfg.Branch), nil
+	}
+	dirty, err := d.Git.Dirty(ctx)
+	if err != nil {
+		return "", err
+	}
+	if dirty {
+		return "checkout has local changes", nil
+	}
+	return "", nil
+}
+
 // Resume finishes a deploy that was cut short: if the checkout already
 // moved to the new commit, it's rolled back as a failed shared deploy.
 func (d *Deployer) Resume(ctx context.Context) error {
+	ctx = context.WithoutCancel(ctx)
 	dep := d.st.Deploying
 	if dep == nil {
 		return nil
@@ -133,25 +161,18 @@ func (d *Deployer) Resume(ctx context.Context) error {
 		d.st.Deploying = nil
 		return d.save()
 	}
+	files, _ := d.Git.ChangedFiles(ctx, dep.From, dep.To)
 	d.event("resumed", dep.To, "", "a deploy was interrupted; rolling it back")
-	return d.sharedRollback(ctx, dep.From, dep.To, d.st.Held, "the deploy was interrupted")
+	return d.rollback(ctx, dep.From, dep.To, d.st.Held, files, "the deploy was interrupted", true)
 }
 
 // Poll deploys the remote branch's newest commit, if it may.
 func (d *Deployer) Poll(ctx context.Context) error {
-	branch, err := d.Git.Branch(ctx)
-	if err != nil {
-		return err
-	}
-	if branch != d.Cfg.Branch {
-		return d.blocked(fmt.Sprintf("checkout is on %q, not %q", branch, d.Cfg.Branch))
-	}
-	dirty, err := d.Git.Dirty(ctx)
-	if err != nil {
-		return err
-	}
-	if dirty {
-		return d.blocked("checkout has local changes")
+	if why, err := d.safe(ctx); err != nil || why != "" {
+		if err != nil {
+			return err
+		}
+		return d.blocked(why)
 	}
 	remote, err := d.Git.Fetch(ctx, d.Cfg.Remote, d.Cfg.Branch)
 	if err != nil {
@@ -176,7 +197,7 @@ func (d *Deployer) Poll(ctx context.Context) error {
 	if d.Cfg.CI != "off" {
 		switch d.CI.Status(ctx, d.Cfg.Repo, remote) {
 		case ci.Pending:
-			d.Log.Printf("CI still running for %s", short(remote))
+			d.Log.Printf("CI still running (or GitHub unreachable) for %s", short(remote))
 			return nil
 		case ci.Failure:
 			d.st.Skipped = append(d.st.Skipped, remote)
@@ -185,6 +206,10 @@ func (d *Deployer) Poll(ctx context.Context) error {
 			return d.save()
 		}
 	}
+
+	// From here on a stop signal waits for the deploy to finish, so it's
+	// never left halfway (the container's stop grace period allows for it).
+	ctx = context.WithoutCancel(ctx)
 
 	old, err := d.Compose.Config(ctx)
 	if err != nil {
@@ -198,6 +223,10 @@ func (d *Deployer) Poll(ctx context.Context) error {
 		}
 		return err
 	}
+	files, err := d.Git.ChangedFiles(ctx, head, remote)
+	if err != nil {
+		return err
+	}
 
 	d.st.Deploying = &state.Deploying{From: head, To: remote}
 	if err := d.save(); err != nil {
@@ -208,24 +237,26 @@ func (d *Deployer) Poll(ctx context.Context) error {
 		_ = d.save()
 		return err
 	}
-	return d.apply(ctx, head, remote, old)
+	return d.apply(ctx, head, remote, old, files)
 }
 
 // apply deploys the checkout (now at to) over from, whose config was old.
-func (d *Deployer) apply(ctx context.Context, from, to string, old compose.Project) error {
+func (d *Deployer) apply(ctx context.Context, from, to string, old compose.Project, files []string) error {
 	heldBefore := maps.Clone(d.st.Held)
-	rollback := func(why string) error { return d.sharedRollback(ctx, from, to, heldBefore, why) }
+	shared := func(why string) error { return d.rollback(ctx, from, to, heldBefore, files, why, true) }
+	retry := func(why string, restore bool) error {
+		return d.retryLater(ctx, from, to, heldBefore, files, why, restore)
+	}
 
 	if err := d.Git.SubmoduleUpdate(ctx); err != nil {
-		return rollback("submodules: " + err.Error())
+		return shared("submodules: " + err.Error())
+	}
+	if err := d.Git.RemoveStray(ctx, files); err != nil {
+		return shared("cleaning the checkout: " + err.Error())
 	}
 	cur, err := d.Compose.Config(ctx)
 	if err != nil {
-		return rollback("compose config: " + err.Error())
-	}
-	files, err := d.Git.ChangedFiles(ctx, from, to)
-	if err != nil {
-		return rollback(err.Error())
+		return shared("compose config: " + err.Error())
 	}
 	p := plan.Make(old, cur, files)
 	for _, f := range files {
@@ -245,113 +276,175 @@ func (d *Deployer) apply(ctx context.Context, from, to string, old compose.Proje
 		}
 	}
 	if err := d.writeOverride(cur); err != nil {
-		return rollback(err.Error())
+		return shared(err.Error())
 	}
 
 	if p.Shared {
-		if err := d.Compose.UpAllWait(ctx); err != nil {
-			return rollback(strings.Join(p.SharedReasons, ", ") + ": " + err.Error())
+		if err := d.Compose.PrepareAll(ctx); err != nil {
+			return retry("building or pulling images: "+err.Error(), false)
 		}
-		return d.finish(ctx, to, nil)
+		if err := d.Compose.UpAllWait(ctx); err != nil {
+			return shared(strings.Join(p.SharedReasons, ", ") + ": " + err.Error())
+		}
+		return d.finish(ctx, to, heldBefore, nil)
 	}
 
-	heldNow := map[string]bool{}
+	blocked := map[string]bool{} // held or not run in this deploy; dependents follow
 	for _, c := range p.Changes {
 		name := c.Service
 		if c.Kind == plan.KindRemoved {
 			if err := d.Compose.Remove(ctx, name); err != nil {
-				return rollback("remove " + name + ": " + err.Error())
+				return shared("remove " + name + ": " + err.Error())
 			}
 			continue
 		}
 		s := cur.Services[name]
-		if heldDependency(s, heldNow) {
-			if err := d.hold(ctx, name, to, "dependency held", old, cur); err != nil {
-				return rollback(err.Error())
+		prev, wasHeld := heldBefore[name]
+		if wasHeld && prev.Definition == nil {
+			wasHeld = false // never deployed: treat like a new service
+		}
+
+		if dependsOnAny(s, blocked) {
+			blocked[name] = true
+			if c.OneShot {
+				d.event("held", to, name, "not run: a service it depends on is held")
+				continue
 			}
-			heldNow[name] = true
+			if err := d.holdUndeployed(ctx, cur, old, name, to, wasHeld, prev, "dependency held"); err != nil {
+				return shared(err.Error())
+			}
 			continue
 		}
 		if c.OneShot {
 			if err := d.Compose.RunOnce(ctx, name); err != nil {
-				return rollback(name + ": " + err.Error())
+				return shared(name + ": " + err.Error())
 			}
 			continue
 		}
-		if c.MountsOnly {
+		if c.MountsOnly && !wasHeld {
 			if err := d.applyMounts(ctx, s); err != nil {
-				return rollback(name + ": " + err.Error())
+				return shared(name + ": " + err.Error())
 			}
 			continue
 		}
 
 		img, err := d.Compose.ImageID(ctx, name)
 		if err != nil {
-			return rollback(err.Error())
+			return shared(err.Error())
 		}
-		derr := d.deployService(ctx, s)
-		if derr == nil {
+		if err := d.prepare(ctx, s); err != nil {
+			return retry(name+": building or pulling: "+err.Error(), true)
+		}
+		uerr := d.Compose.UpWait(ctx, name, false)
+		if uerr == nil {
 			continue
 		}
-		d.Log.Printf("%s unhealthy: %v", name, derr)
-		heldNow[name] = true
-		if c.Kind == plan.KindNew || img == "" {
+		d.Log.Printf("%s unhealthy: %v", name, uerr)
+		blocked[name] = true
+
+		h, heldOnce := heldBefore[name]
+		neverDeployed := c.Kind == plan.KindNew || (heldOnce && h.Definition == nil)
+		switch {
+		case neverDeployed:
+			// A new service that fails is left out, unless others need it.
+			if hasDependents(cur, name) {
+				return shared(name + " (new) is unhealthy and other services depend on it")
+			}
 			if err := d.Compose.Remove(ctx, name); err != nil {
-				return rollback(err.Error())
+				return shared(err.Error())
 			}
-			d.st.Held[name] = state.Held{Service: name, Commit: to, Reason: "not deployed: " + derr.Error(), Since: d.Now()}
-			d.event("held", to, name, "new service failed; not deployed")
+			d.st.Held[name] = state.Held{Service: name, Commit: to, Reason: "not deployed: " + short500(uerr.Error()), Since: d.Now()}
+			d.event("held", to, name, "new service is unhealthy; not deployed")
 			if err := d.writeOverride(cur); err != nil {
-				return rollback(err.Error())
+				return shared(err.Error())
 			}
-			continue
-		}
-		d.st.Held[name] = state.Held{Service: name, Commit: to, Reason: derr.Error(), Since: d.Now(),
-			Image: img, Definition: old.Services[name].Raw}
-		d.event("held", to, name, derr.Error())
-		if err := d.writeOverride(cur); err != nil {
-			return rollback(err.Error())
-		}
-		if err := d.Compose.UpWait(ctx, name, false); err != nil {
-			return rollback(name + "'s previous version is unhealthy too: " + err.Error())
+		case img == "":
+			// No previous container to go back to.
+			return shared(name + " is unhealthy and had no previous container to go back to")
+		default:
+			def := old.Services[name].Raw
+			if wasHeld {
+				def = prev.Definition // what it was held on, not the version that failed before
+			}
+			if err := d.pin(ctx, cur, name, to, img, def, short500(uerr.Error())); err != nil {
+				return shared(err.Error())
+			}
+			if err := d.Compose.UpWait(ctx, name, false); err != nil {
+				return shared(name + "'s previous version is unhealthy too: " + err.Error())
+			}
 		}
 	}
-	return d.finish(ctx, to, heldNow)
+	return d.finish(ctx, to, heldBefore, blocked)
 }
 
-// hold keeps a service that wasn't deployed on what it runs now.
-func (d *Deployer) hold(ctx context.Context, name, commit, reason string, old, cur compose.Project) error {
+// holdUndeployed keeps a service whose dependency is held on what it runs
+// now (it isn't deployed).
+func (d *Deployer) holdUndeployed(ctx context.Context, cur, old compose.Project, name, to string, wasHeld bool, prev state.Held, reason string) error {
+	if wasHeld {
+		d.st.Held[name] = prev
+		d.event("held", to, name, reason)
+		return d.writeOverride(cur)
+	}
+	prevDef, existed := old.Services[name]
+	if !existed {
+		if hasDependents(cur, name) {
+			return fmt.Errorf("%s (new) can't be deployed and other services depend on it", name)
+		}
+		d.st.Held[name] = state.Held{Service: name, Commit: to, Reason: "not deployed: " + reason, Since: d.Now()}
+		d.event("held", to, name, reason)
+		return d.writeOverride(cur)
+	}
 	img, err := d.Compose.ImageID(ctx, name)
 	if err != nil {
 		return err
 	}
-	h := state.Held{Service: name, Commit: commit, Reason: reason, Since: d.Now()}
-	if prev, ok := old.Services[name]; ok && img != "" {
-		h.Image, h.Definition = img, prev.Raw
+	if img == "" {
+		return fmt.Errorf("%s: a dependency is held and it has no container to keep", name)
 	}
-	d.st.Held[name] = h
+	return d.pin(ctx, cur, name, to, img, prevDef.Raw, reason)
+}
+
+// pin holds a service on an image and definition. The image gets a tag,
+// so pruning can't delete it while it's held.
+func (d *Deployer) pin(ctx context.Context, cur compose.Project, name, commit, img string, def json.RawMessage, reason string) error {
+	ref := img
+	if !strings.HasPrefix(img, heldTag) {
+		ref = heldTag + name + ":" + short(commit)
+		if err := d.Compose.Tag(ctx, img, ref); err != nil {
+			return fmt.Errorf("tag %s: %w", name, err)
+		}
+	}
+	d.st.Held[name] = state.Held{Service: name, Commit: commit, Reason: reason, Since: d.Now(), Image: ref, Definition: def}
 	d.event("held", commit, name, reason)
 	return d.writeOverride(cur)
 }
 
-func heldDependency(s compose.Service, held map[string]bool) bool {
+func dependsOnAny(s compose.Service, set map[string]bool) bool {
 	for _, dep := range s.DependsOn {
-		if held[dep] {
+		if set[dep] {
 			return true
 		}
 	}
 	return false
 }
 
-func (d *Deployer) deployService(ctx context.Context, s compose.Service) error {
-	if s.BuildContext != "" {
-		if err := d.Compose.Build(ctx, s.Name); err != nil {
-			return err
+func hasDependents(p compose.Project, name string) bool {
+	for _, s := range p.Services {
+		for _, dep := range s.DependsOn {
+			if dep == name {
+				return true
+			}
 		}
-	} else if err := d.Compose.Pull(ctx, s.Name); err != nil {
-		return err
 	}
-	return d.Compose.UpWait(ctx, s.Name, false)
+	return false
+}
+
+// prepare builds or pulls a service's new image.
+func (d *Deployer) prepare(ctx context.Context, s compose.Service) error {
+	if s.BuildContext != "" {
+		return d.Compose.Build(ctx, s.Name)
+	}
+	return d.Compose.Pull(ctx, s.Name)
 }
 
 // applyMounts applies a change to a service's mounted files: check and
@@ -369,50 +462,83 @@ func (d *Deployer) applyMounts(ctx context.Context, s compose.Service) error {
 	return d.Compose.UpWait(ctx, s.Name, true)
 }
 
-// sharedRollback puts the checkout back on from (with the services held
-// before), brings everything up, and never tries to again.
-func (d *Deployer) sharedRollback(ctx context.Context, from, to string, held map[string]state.Held, why string) error {
-	d.Log.Printf("rolling back %s: %s", short(to), why)
-	var errs []error
+// rollback puts the checkout back on from (with the services held before)
+// and brings everything up. A rolled-back commit is skipped for good
+// (skip); a commit that only failed to build or pull isn't, and is tried
+// again next poll.
+func (d *Deployer) rollback(ctx context.Context, from, to string, heldBefore map[string]state.Held, files []string, why string, skip bool) error {
+	return d.undo(ctx, from, to, heldBefore, files, why, skip, true, "rolled-back")
+}
+
+func (d *Deployer) retryLater(ctx context.Context, from, to string, heldBefore map[string]state.Held, files []string, why string, restore bool) error {
+	return d.undo(ctx, from, to, heldBefore, files, why, false, restore, "build-failed")
+}
+
+func (d *Deployer) undo(ctx context.Context, from, to string, heldBefore map[string]state.Held, files []string, why string, skip, restore bool, result string) error {
+	d.Log.Printf("undoing %s: %s", short(to), why)
+	d.releaseTags(ctx, d.st.Held, heldBefore) // tags made in this deploy
+
+	// If the checkout can't be put back, don't bring anything up on the
+	// bad commit: record it and let a person look (Resume retries on the
+	// next start, since Deploying stays set).
 	if err := d.Git.ResetKeep(ctx, from); err != nil {
-		errs = append(errs, err)
+		return d.rollbackFailed(to, why, err)
 	}
 	if err := d.Git.SubmoduleUpdate(ctx); err != nil {
-		errs = append(errs, err)
+		return d.rollbackFailed(to, why, err)
 	}
-	d.st.Held = maps.Clone(held)
+	if err := d.Git.RemoveStray(ctx, files); err != nil {
+		return d.rollbackFailed(to, why, err)
+	}
+
+	var problems []error
+	d.st.Held = maps.Clone(heldBefore)
 	if d.st.Held == nil {
 		d.st.Held = map[string]state.Held{}
 	}
 	if cur, err := d.Compose.Config(ctx); err == nil {
 		if err := d.writeOverride(cur); err != nil {
-			errs = append(errs, err)
+			problems = append(problems, err)
 		}
 	} else {
-		errs = append(errs, err)
+		problems = append(problems, err)
 	}
-	if err := d.Compose.UpAllWait(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("previous version unhealthy too: %w", err))
+	if restore {
+		if err := d.Compose.UpAllWait(ctx); err != nil {
+			problems = append(problems, fmt.Errorf("previous version unhealthy too: %w", err))
+		}
 	}
-	d.st.Skipped = append(d.st.Skipped, to)
+	if skip {
+		d.st.Skipped = append(d.st.Skipped, to)
+	}
 	d.st.Deploying = nil
-	d.st.LastResult = "rolled-back"
+	d.st.LastResult = result
 	msg := why
-	if err := errors.Join(errs...); err != nil {
-		msg += "; rollback problems: " + err.Error()
+	if err := errors.Join(problems...); err != nil {
+		msg += "; problems while undoing: " + err.Error()
 	}
-	d.event("rolled-back", to, "", msg)
+	if !skip {
+		msg += " (will try again)"
+	}
+	d.event(result, to, "", short500(msg))
 	d.readExpiry(ctx)
 	return d.save()
 }
 
-func (d *Deployer) finish(ctx context.Context, to string, held map[string]bool) error {
+func (d *Deployer) rollbackFailed(to, why string, err error) error {
+	d.st.LastResult = "rollback-failed"
+	d.event("rollback-failed", to, "", short500(why+"; could not put the checkout back: "+err.Error()+"; fix the checkout by hand"))
+	return d.save()
+}
+
+func (d *Deployer) finish(ctx context.Context, to string, heldBefore map[string]state.Held, blocked map[string]bool) error {
+	d.releaseTags(ctx, heldBefore, d.st.Held) // holds this deploy released
 	subject, _ := d.Git.Subject(ctx, to)
 	d.st.Deployed.Commit, d.st.Deployed.Subject, d.st.Deployed.At = to, subject, d.Now()
 	d.st.Deploying = nil
-	if len(held) > 0 {
+	if len(blocked) > 0 {
 		var names []string
-		for n := range held {
+		for n := range blocked {
 			names = append(names, n)
 		}
 		sort.Strings(names)
@@ -424,6 +550,21 @@ func (d *Deployer) finish(ctx context.Context, to string, held map[string]bool) 
 	}
 	d.readExpiry(ctx)
 	return d.save()
+}
+
+// releaseTags removes the held-image tags in from that keep isn't using.
+func (d *Deployer) releaseTags(ctx context.Context, from, keep map[string]state.Held) {
+	inUse := map[string]bool{}
+	for _, h := range keep {
+		inUse[h.Image] = true
+	}
+	for _, h := range from {
+		if strings.HasPrefix(h.Image, heldTag) && !inUse[h.Image] {
+			if err := d.Compose.Untag(ctx, h.Image); err != nil {
+				d.Log.Printf("untag %s: %v", h.Image, err)
+			}
+		}
+	}
 }
 
 func (d *Deployer) writeOverride(cur compose.Project) error {
@@ -466,4 +607,13 @@ func short(sha string) string {
 		return sha[:7]
 	}
 	return sha
+}
+
+// short500 keeps messages (often whole command output) readable in the
+// status and on the dashboard.
+func short500(s string) string {
+	if len(s) > 500 {
+		return s[:500] + "…"
+	}
+	return s
 }

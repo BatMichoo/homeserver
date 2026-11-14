@@ -157,7 +157,7 @@ func TestPollUnhealthyServiceHeld(t *testing.T) {
 	assert.Equal(t, "partial", s.LastResult)
 	h := s.Held["web"]
 	assert.Equal(t, "c2", h.Commit)
-	assert.Equal(t, "img-web@c1", h.Image)
+	assert.Equal(t, "homeserver-held/web:c2", h.Image)
 	assert.JSONEq(t, `{"build":{"context":"web"}}`, string(h.Definition), "the old definition")
 	assert.Contains(t, w.override(), "  web:\n")
 	assert.Contains(t, w.override(), `environment: !reset null`, "the new key is undone")
@@ -265,7 +265,7 @@ func TestPollSharedSuccess(t *testing.T) {
 	cfg.Volumes = json.RawMessage(`{"new":{}}`)
 	w.push("c2", "volume", cfg)
 	require.NoError(t, w.d.Poll(ctx))
-	assert.Equal(t, []string{"up-all"}, w.compose.calls)
+	assert.Equal(t, []string{"prepare-all", "up-all"}, w.compose.calls)
 	assert.Equal(t, "deployed", w.state().LastResult)
 }
 

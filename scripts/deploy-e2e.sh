@@ -123,4 +123,15 @@ grep -q '"held": \[\]' "$server/.deploy/public/status.json" || fail "round 4: so
 [ "$(health beta)" = healthy ] || fail "round 4: beta unhealthy"
 echo "round 4 (held service fixed): ok"
 
+# 5. Remove a service: its container goes, nothing else is touched.
+alpha=$(cid alpha)
+sed -i '/^  beta:$/,$d' "$work/docker-compose.yaml"
+push "drop beta" >/dev/null
+deploy
+[ "$(result)" = deployed ] || fail "round 5: status $(result)"
+[ -z "$(docker ps -aq --filter label=com.docker.compose.project=homeserver-deploy-e2e --filter label=com.docker.compose.service=beta)" ] ||
+	fail "round 5: beta's container still there"
+[ "$(cid alpha)" = "$alpha" ] || fail "round 5: alpha was recreated"
+echo "round 5 (service removed): ok"
+
 echo "deploy-e2e: ok"

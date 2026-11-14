@@ -9,7 +9,13 @@ import (
 // has come (today: the certificate check), then reloads the services that
 // depend on them and have a reload command (nginx, for a renewed
 // certificate). A failure is recorded and retried at the next tick.
+// Nothing runs while the checkout is on another branch or modified: it
+// would run code that never passed CI.
 func (d *Deployer) Schedule(ctx context.Context) error {
+	ctx = context.WithoutCancel(ctx)
+	if why, err := d.safe(ctx); err != nil || why != "" {
+		return err
+	}
 	p, err := d.Compose.Config(ctx)
 	if err != nil {
 		return err

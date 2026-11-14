@@ -127,6 +127,8 @@ services:
     build:
       context: ./deploy
     restart: unless-stopped
+    # A deploy in progress finishes before the deployer stops.
+    stop_grace_period: 10m
     user: "${AUTODEPLOY_UID:-1000}:${AUTODEPLOY_GID:-1000}"
     group_add:
       - "${DOCKER_GID:-999}"

@@ -155,3 +155,40 @@ func (f fileProtocol) Run(ctx context.Context, dir string, stdin io.Reader, name
 	}
 	return f.Exec.Run(ctx, dir, stdin, name, args...)
 }
+
+// Removing a submodule leaves its directory behind in a checkout that had
+// it; RemoveStray clears it so the checkout isn't "modified" forever.
+// Tracked paths and ignored files are left alone.
+func TestRemoveStraySubmoduleLeftovers(t *testing.T) {
+	dev, server, remote, g := setup(t)
+	g.R = fileProtocol{run.Exec{}}
+	app := filepath.Join(filepath.Dir(dev), "app")
+	sh(t, filepath.Dir(dev), "init", "-q", "-b", "main", app)
+	write(t, filepath.Join(app, "main.go"), "v1\n")
+	sh(t, app, "add", "-A")
+	sh(t, app, "commit", "-qm", "v1")
+	sh(t, dev, "-c", "protocol.file.allow=always", "submodule", "add", "-q", app, "apps/app")
+	sh(t, dev, "commit", "-qm", "add app")
+	sh(t, dev, "push", "-q", "origin", "main")
+	added, err := g.Fetch(ctx, remote, "main")
+	require.NoError(t, err)
+	require.NoError(t, g.FastForward(ctx, added))
+	require.NoError(t, g.SubmoduleUpdate(ctx))
+
+	sh(t, dev, "rm", "-q", "apps/app")
+	sh(t, dev, "commit", "-qm", "drop app")
+	sh(t, dev, "push", "-q", "origin", "main")
+	removed, err := g.Fetch(ctx, remote, "main")
+	require.NoError(t, err)
+	require.NoError(t, g.FastForward(ctx, removed))
+	write(t, filepath.Join(server, ".deploy", "keep.json"), "{}")
+
+	dirty, _ := g.Dirty(ctx)
+	require.True(t, dirty, "the leftover submodule directory shows as untracked")
+	require.NoError(t, g.RemoveStray(ctx, []string{"apps/app", "README.md", "gone/file"}))
+	dirty, _ = g.Dirty(ctx)
+	assert.False(t, dirty)
+	assert.NoDirExists(t, filepath.Join(server, "apps", "app"))
+	assert.FileExists(t, filepath.Join(server, "README.md"), "tracked files untouched")
+	assert.FileExists(t, filepath.Join(server, ".deploy", "keep.json"), "ignored files untouched")
+}

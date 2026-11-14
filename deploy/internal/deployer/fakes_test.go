@@ -30,12 +30,13 @@ type commit struct {
 }
 
 type fakeGit struct {
-	commits map[string]commit
-	head    string
-	remote  string
-	branch  string
-	dirty   bool
-	calls   []string
+	commits    map[string]commit
+	head       string
+	remote     string
+	branch     string
+	dirty      bool
+	resetFails bool
+	calls      []string
 }
 
 func (g *fakeGit) Branch(context.Context) (string, error) { return g.branch, nil }
@@ -77,7 +78,14 @@ func (g *fakeGit) FastForward(ctx context.Context, sha string) error {
 }
 func (g *fakeGit) ResetKeep(ctx context.Context, sha string) error {
 	g.calls = append(g.calls, "reset "+sha)
+	if g.resetFails {
+		return errors.New("reset failed")
+	}
 	g.head = sha
+	return nil
+}
+func (g *fakeGit) RemoveStray(ctx context.Context, paths []string) error {
+	g.calls = append(g.calls, "clean "+strings.Join(paths, ","))
 	return nil
 }
 func (g *fakeGit) SubmoduleUpdate(context.Context) error { return nil }
@@ -95,7 +103,10 @@ type fakeCompose struct {
 	rollbackFails map[string]bool
 	checkFails    map[string]map[string]bool // commit -> service
 	oneShotFails  map[string]bool
-	images        map[string]string // service -> running image
+	buildFails    map[string]bool   // service -> build/pull fails (registry down)
+	images        map[string]string // service -> image of its container (running or stopped)
+	stopped       map[string]bool   // service has a container that isn't running
+	tags          map[string]string // tag -> image
 	calls         []string
 }
 
@@ -106,10 +117,35 @@ func (c *fakeCompose) Config(context.Context) (compose.Project, error) {
 }
 func (c *fakeCompose) Build(ctx context.Context, svc string) error {
 	c.call("build " + svc)
+	if c.buildFails[svc] {
+		return errors.New("build failed: registry unreachable")
+	}
 	return nil
 }
 func (c *fakeCompose) Pull(ctx context.Context, svc string) error {
 	c.call("pull " + svc)
+	if c.buildFails[svc] {
+		return errors.New("pull failed: registry unreachable")
+	}
+	return nil
+}
+func (c *fakeCompose) PrepareAll(ctx context.Context) error {
+	c.call("prepare-all")
+	for name := range c.git.commits[c.git.head].cfg.Services {
+		if c.buildFails[name] {
+			return errors.New(name + ": registry unreachable")
+		}
+	}
+	return nil
+}
+func (c *fakeCompose) Tag(ctx context.Context, image, ref string) error {
+	c.call("tag " + ref)
+	c.tags[ref] = image
+	return nil
+}
+func (c *fakeCompose) Untag(ctx context.Context, ref string) error {
+	c.call("untag " + ref)
+	delete(c.tags, ref)
 	return nil
 }
 
@@ -134,6 +170,10 @@ func (c *fakeCompose) start(svc string) error {
 }
 
 func (c *fakeCompose) UpWait(ctx context.Context, svc string, recreate bool) error {
+	if err := ctx.Err(); err != nil {
+		c.call("up " + svc + " (cancelled)")
+		return err
+	}
 	if recreate {
 		c.call("recreate " + svc)
 	} else {
@@ -142,7 +182,11 @@ func (c *fakeCompose) UpWait(ctx context.Context, svc string, recreate bool) err
 	return c.start(svc)
 }
 
-func (c *fakeCompose) UpAllWait(context.Context) error {
+func (c *fakeCompose) UpAllWait(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		c.call("up-all (cancelled)")
+		return err
+	}
 	c.call("up-all")
 	var errs []error
 	for name, s := range c.git.commits[c.git.head].cfg.Services {
@@ -174,7 +218,7 @@ func (c *fakeCompose) ImageID(ctx context.Context, svc string) (string, error) {
 	return c.images[svc], nil
 }
 func (c *fakeCompose) Running(ctx context.Context, svc string) (bool, error) {
-	return c.images[svc] != "", nil
+	return c.images[svc] != "" && !c.stopped[svc], nil
 }
 func (c *fakeCompose) Remove(ctx context.Context, svc string) error {
 	c.call("rm " + svc)
@@ -215,7 +259,7 @@ func newWorld(t *testing.T, first compose.Project) *world {
 	w := &world{t: t, git: g, ci: fakeCI{}, now: t0, cfg: cfg}
 	w.compose = &fakeCompose{git: g, stateDir: cfg.StateDir, unhealthy: map[string]map[string]bool{},
 		rollbackFails: map[string]bool{}, checkFails: map[string]map[string]bool{}, oneShotFails: map[string]bool{},
-		images: map[string]string{}}
+		buildFails: map[string]bool{}, images: map[string]string{}, stopped: map[string]bool{}, tags: map[string]string{}}
 	for name, s := range first.Services {
 		if s.LongRunning() {
 			w.compose.images[name] = "img-" + name + "@c1"

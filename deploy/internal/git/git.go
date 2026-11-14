@@ -84,6 +84,25 @@ func (g Git) SubmoduleUpdate(ctx context.Context) error {
 	return err
 }
 
+// RemoveStray deletes paths among the given ones that are directories git
+// no longer tracks, such as a removed submodule's leftover checkout
+// (`git merge` and `git reset` leave those behind). Tracked paths and
+// ignored files are never touched.
+func (g Git) RemoveStray(ctx context.Context, paths []string) error {
+	for _, p := range paths {
+		if p == "" || strings.HasPrefix(p, "/") || strings.Contains(p, "..") {
+			continue
+		}
+		if tracked, _ := g.git(ctx, "ls-files", "--", p); tracked != "" {
+			continue
+		}
+		if _, err := g.git(ctx, "clean", "-ffdq", "--", p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Subject is a commit's first line.
 func (g Git) Subject(ctx context.Context, sha string) (string, error) {
 	return g.git(ctx, "log", "-1", "--format=%s", sha)

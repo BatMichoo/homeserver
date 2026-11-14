@@ -93,16 +93,29 @@ func (c Client) Exec(ctx context.Context, svc string, stdin io.Reader, cmd ...st
 
 // ImageID is the image of the service's running container ("" if none).
 func (c Client) ImageID(ctx context.Context, svc string) (string, error) {
-	out, err := c.compose(ctx, nil, "ps", "-q", svc)
-	if err != nil {
+	ids, err := c.containers(ctx, svc)
+	if err != nil || len(ids) == 0 {
 		return "", err
 	}
-	id := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
-	if id == "" {
-		return "", nil
-	}
-	img, err := c.R.Run(ctx, c.Dir, nil, "docker", "inspect", "--format", "{{.Image}}", id)
+	img, err := c.R.Run(ctx, c.Dir, nil, "docker", "inspect", "--format", "{{.Image}}", ids[0])
 	return strings.TrimSpace(string(img)), err
+}
+
+// containers lists a service's containers, running or stopped, by
+// compose's labels (so it works for services the current compose file no
+// longer has).
+func (c Client) containers(ctx context.Context, svc string) ([]string, error) {
+	p, err := c.Config(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out, err := c.R.Run(ctx, c.Dir, nil, "docker", "ps", "-aq",
+		"--filter", "label=com.docker.compose.project="+p.Name,
+		"--filter", "label=com.docker.compose.service="+svc)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(string(out)), nil
 }
 
 // Running is true when the service has a running container.
@@ -111,8 +124,37 @@ func (c Client) Running(ctx context.Context, svc string) (bool, error) {
 	return strings.TrimSpace(string(out)) != "", err
 }
 
-// Remove stops and removes a service's containers.
+// Remove stops and removes a service's containers, also when the compose
+// file no longer has the service (compose itself refuses that).
 func (c Client) Remove(ctx context.Context, svc string) error {
-	_, err := c.compose(ctx, nil, "rm", "-s", "-f", svc)
+	ids, err := c.containers(ctx, svc)
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+	_, err = c.R.Run(ctx, c.Dir, nil, "docker", append([]string{"rm", "-f"}, ids...)...)
+	return err
+}
+
+// PrepareAll builds and pulls every image, without starting anything, so
+// a registry or network failure shows up before anything changes.
+func (c Client) PrepareAll(ctx context.Context) error {
+	if _, err := c.compose(ctx, nil, "build"); err != nil {
+		return err
+	}
+	_, err := c.compose(ctx, nil, "pull", "--ignore-buildable")
+	return err
+}
+
+// Tag gives an image an extra name (a held service's image, so pruning
+// can't delete it).
+func (c Client) Tag(ctx context.Context, image, ref string) error {
+	_, err := c.R.Run(ctx, c.Dir, nil, "docker", "tag", image, ref)
+	return err
+}
+
+// Untag removes a name added by Tag; the image itself stays while
+// anything uses it.
+func (c Client) Untag(ctx context.Context, ref string) error {
+	_, err := c.R.Run(ctx, c.Dir, nil, "docker", "image", "rm", "--no-prune", ref)
 	return err
 }
