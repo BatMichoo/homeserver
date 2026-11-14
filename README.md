@@ -2,7 +2,7 @@
 
 The manager of the home server: the reverse proxy (nginx), the home
 certificate authority (CA) that gives every service a trusted HTTPS
-certificate, the login service, and soon the auto-deployer. Apps
+certificate, the login service, and the deployer. Apps
 (Expenser, media) join later and know nothing about how they're hosted.
 
 Right now it runs:
@@ -15,6 +15,8 @@ Right now it runs:
 - **db** and **db-setup**: Postgres for the home server's services.
   `db-setup` creates each service's database and role on every `up`.
 - **auth**: the login service at `https://auth.<LAN_DOMAIN>/`.
+- **deployer** (opt-in, `make autodeploy`): deploys `main` after CI
+  passes, one service at a time, and runs the certificate check monthly.
 
 ## Setup
 
@@ -85,10 +87,10 @@ Renewals don't need this again; only a new CA does.
 - `make renew-certs`: issue one now regardless, and restart nginx.
 - `make ca-backup` / `make ca-restore`: save the CA to `ca-backup.tgz` and put it back, for example on a new server. Keep the backup private: the CA's key can sign a certificate for any website, and your devices would believe it. If the CA is lost, every device has to trust a new one.
 
-Until the auto-deployer is added, nothing checks the certificate on its
-own: run `make certs` now and then. It issues a new certificate only when
-the current one expires within 45 days (or no longer matches `.env`), and
-has nginx load it.
+The deployer runs the certificate check every 30 days and has nginx load
+a renewed certificate. Without it, run `make certs` now and then: it
+issues a new certificate only when the current one expires within 45 days
+(or no longer matches `.env`), and has nginx load it.
 
 ## Login (auth service)
 
@@ -185,8 +187,10 @@ connect to its own database.
 
 ## Dashboard
 
-`www/html/index.html` is the page at `https://<LAN_IP>/`: clock, services
-(none yet) and how to trust the CA. It uses the shared theme
+`www/html/index.html` is the page at `https://<LAN_IP>/`: clock, the
+server's status (last deploy, services held back, certificate expiry, from
+the deployer's `/deploy/status.json`), services (none yet) and how to
+trust the CA. It uses the shared theme
 ([BatMichoo/theme](https://github.com/BatMichoo/theme)), whose files are
 copied into `www/html/theme/`. To move to a newer theme, change
 `THEME_VERSION` in the Makefile and run `make theme`.
@@ -211,14 +215,99 @@ lines as soon as a block sets one. To redirect to HTTPS, use
 `https://$host$https_port_suffix$request_uri` so a non-default
 `HTTPS_PORT` is kept.
 
+## Deploying (the deployer)
+
+On the server, once:
+
+```sh
+make autodeploy
+```
+
+This starts the `deployer` container (code in `deploy/`). Every 30 minutes
+(`DEPLOY_INTERVAL`) it checks GitHub for a new commit on `main`. Pushing to
+`main` is the only way anything gets deployed. For each new commit:
+
+1. **It waits for CI.** A commit whose CI failed is skipped for good. If
+   GitHub can't be reached, it waits.
+2. **It won't touch a modified checkout.** If the checkout on the server
+   has local changes, isn't on `main`, or has diverged from it, it does
+   nothing and says so.
+3. **It backs up** every database of services labelled
+   `homeserver.backup: postgres` into `backups/` (newest 14 per database,
+   `DEPLOY_BACKUP_KEEP`). If the backup fails, it doesn't deploy, and
+   tries again at the next check.
+4. **It works out which services the commit changed:** a changed service
+   definition, a file in its build folder (a submodule bump counts), or a
+   file it mounts.
+5. **It deploys only those,** one at a time in dependency order, waiting
+   for each one's healthcheck.
+   - **A service that fails** goes back to its previous version (image and
+     settings) and is listed as **held**. The other services keep their new
+     versions. It stays held until a later commit changes it again.
+   - **A change only to mounted files** (e.g. an nginx site) is checked
+     and reloaded in place when the service says how (labels below).
+   - **Shared changes** (networks, volumes, a one-shot like `certs`, a
+     check that fails, a held service whose old version won't start
+     either) put the whole commit back, bring everything up, and skip the
+     commit for good.
+
+Status is in `.deploy/` (not in git): `state.json`, `override.yaml` (the
+held services' previous versions; `make up` uses it too, so it never
+starts a held-back version), and `public/status.json`, which the dashboard
+shows and nginx serves at `/deploy/status.json`.
+
+- `make autodeploy-logs` shows what it's doing. `make autodeploy-stop`
+  stops it.
+- Changes to `deploy/` itself take effect after `make autodeploy` again
+  (the status shows a "deployer-outdated" event until then).
+- **A held service** is retried by pushing a commit that changes it. To
+  give up on holding one by hand: stop the deployer, delete
+  `.deploy/override.yaml` and the service's entry under `Held` in
+  `.deploy/state.json`, run `make up`, then `make autodeploy`.
+- **Rolling back a database** isn't automatic. A failed version's
+  migrations stay; restore from `backups/` if needed:
+
+  ```sh
+  gunzip -c backups/db-<database>-<time>-<commit>.sql.gz | docker compose exec -T db psql -U postgres <database>
+  ```
+
+  (into an empty database: drop and recreate it first.)
+
+### Adding a service
+
+Nothing in the deployer changes. In `docker-compose.yaml`:
+
+- **A `healthcheck`** for every service that keeps running (`make check`
+  fails without one). One-shots are marked `restart: "no"`.
+- **A web UI:** a site file in `nginx/sites/` (see "Protecting a site").
+- **Its own database:** a line in `db/apps` and `<NAME>_DB_PASSWORD`.
+- **Built from an app repo:** add it as a git submodule (e.g.
+  `apps/<name>`) with `build.context` pointing into it. Bumping the
+  submodule deploys it.
+- **A third-party image:** pin it by digest (`image: name@sha256:…`), so
+  changing the pin is what deploys it.
+- **Optional labels:**
+
+| Label | Example | Meaning |
+|---|---|---|
+| `homeserver.check` | `nginx -t` | run before applying a mounted-file change; failure = don't apply |
+| `homeserver.reload` | `nginx -s reload` | apply a mounted-file change without recreating the container |
+| `homeserver.backup` | `postgres` | dump this service's databases before every deploy |
+| `homeserver.every` | `720h` | run this one-shot that often, then reload what depends on it |
+| `homeserver.tls` | `443` | read the certificate's expiry from this port, for the status |
+
 ## Checks
 
 - `make check`: lints the shell scripts, validates the compose file,
   checks every site includes the security headers, runs `gofmt` and
-  `go vet` on the auth service, and runs `nginx -t` against a throwaway
+  `go vet` on the auth service and the deployer, checks every long-running
+  service has a healthcheck, and runs `nginx -t` against a throwaway
   certificate.
 - `make test`: runs the auth service's Go tests against a throwaway
-  Postgres container.
+  Postgres container, and the deployer's tests.
+- `make deploy-e2e`: runs the real deployer on a small fixture project
+  (`deploy/testdata/e2e`) with a local git remote: one service changed,
+  one held back, a shared change rolled back, a held service fixed.
 - `make smoke`: starts the whole stack under a throwaway project (its own
   volumes, certificate folder and ports 18080/18443) with a test-only
   protected site (`scripts/smoke/whoami.conf`). It checks the

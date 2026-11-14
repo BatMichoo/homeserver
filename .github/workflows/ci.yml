@@ -25,7 +25,9 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: auth/go.mod
-          cache-dependency-path: auth/go.sum
+          cache-dependency-path: |
+            auth/go.sum
+            deploy/go.sum
 
       - name: make check
         run: make check
@@ -39,7 +41,9 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: auth/go.mod
-          cache-dependency-path: auth/go.sum
+          cache-dependency-path: |
+            auth/go.sum
+            deploy/go.sum
 
       - name: make test
         run: make test
@@ -52,3 +56,30 @@ jobs:
 
       - name: make smoke
         run: make smoke
+
+  deploy-e2e:
+    name: Deployer end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: deploy/go.mod
+          cache-dependency-path: deploy/go.sum
+
+      - name: make deploy-e2e
+        run: make deploy-e2e
+
+  # Every image builds, apps included (submodules), so a bump that doesn't
+  # build never reaches the deployer.
+  build:
+    name: Build images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: docker compose build
+        run: docker compose --env-file .env.template --profile autodeploy build

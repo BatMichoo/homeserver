@@ -1,0 +1,28 @@
+# Fixture for scripts/deploy-e2e.sh: two tiny services the deployer
+# handles like the real ones. alpha is built from alpha/ and is healthy
+# unless alpha/version says "bad"; beta is an image and is healthy when
+# HEALTHY is "yes".
+name: homeserver-deploy-e2e
+
+services:
+  alpha:
+    build:
+      context: ./alpha
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ok"]
+      interval: 1s
+      timeout: 1s
+      retries: 2
+
+  beta:
+    image: busybox:1.36
+    command: ["sh", "-c", "if [ \"$$HEALTHY\" = yes ]; then touch /tmp/ok; fi; exec sleep 86400"]
+    environment:
+      HEALTHY: "yes"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ok"]
+      interval: 1s
+      timeout: 1s
+      retries: 2

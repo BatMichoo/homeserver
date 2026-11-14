@@ -53,6 +53,12 @@ func WriteOverride(dir string, held map[string]Held, newDefs map[string]json.Raw
 			case "build", "image", "pull_policy":
 				continue
 			}
+			// compose prints unset fields as null; overriding with null
+			// would set them (an entrypoint called "null"), so reset them.
+			if strings.TrimSpace(string(v)) == "null" {
+				lines[k] = "!reset null"
+				continue
+			}
 			lines[k] = "!override " + compact(v)
 		}
 		var cur map[string]json.RawMessage

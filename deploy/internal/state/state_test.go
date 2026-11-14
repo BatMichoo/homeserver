@@ -105,6 +105,17 @@ services:
 `, string(b))
 }
 
+// compose prints unset fields as null; overriding with null would set them
+// (e.g. an entrypoint called "null"), so they're reset instead.
+func TestOverrideNullFieldsReset(t *testing.T) {
+	dir := t.TempDir()
+	held := map[string]Held{"b": {Service: "b", Image: "sha256:1", Definition: json.RawMessage(`{"entrypoint":null,"command":["sh"]}`)}}
+	require.NoError(t, WriteOverride(dir, held, nil))
+	b, _ := os.ReadFile(filepath.Join(dir, "override.yaml"))
+	assert.Contains(t, string(b), "    entrypoint: !reset null\n")
+	assert.Contains(t, string(b), `    command: !override ["sh"]`)
+}
+
 func TestOverrideNotDeployedProfile(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, WriteOverride(dir, map[string]Held{"new": {Service: "new", Reason: "unhealthy"}}, nil))
