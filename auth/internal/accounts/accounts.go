@@ -22,6 +22,13 @@ import (
 // User is an account (see model.User).
 type User = model.User
 
+// InputError is a value that breaks a rule; Key names the rule (for a
+// translated message). errors.Is(err, ErrInvalidInput) holds for it.
+type InputError struct{ Key string }
+
+func (e *InputError) Error() string        { return "invalid input: " + e.Key }
+func (e *InputError) Is(target error) bool { return target == ErrInvalidInput }
+
 var (
 	ErrInvalidCredentials = errors.New("wrong username or password")
 	ErrInvalidInput       = errors.New("invalid input")
@@ -76,11 +83,14 @@ func New(store Store, ttl time.Duration) *Service {
 	}
 }
 
+// TTL is how long a session lasts since its last extension.
+func (s *Service) TTL() time.Duration { return s.ttl }
+
 // Register creates an account.
 func (s *Service) Register(ctx context.Context, username, password, confirm string) (User, error) {
 	username = strings.TrimSpace(username)
 	if n := utf8.RuneCountInString(username); n < minUsername || n > maxUsername {
-		return User{}, fmt.Errorf("%w: username must be %d to %d characters", ErrInvalidInput, minUsername, maxUsername)
+		return User{}, &InputError{"username_length"}
 	}
 	if err := checkNewPassword(password, confirm); err != nil {
 		return User{}, err
@@ -171,10 +181,10 @@ func (s *Service) UpdateProfile(ctx context.Context, userID, displayName, email 
 	displayName = strings.TrimSpace(displayName)
 	email = strings.TrimSpace(email)
 	if utf8.RuneCountInString(displayName) > maxDisplayName {
-		return fmt.Errorf("%w: display name must be at most %d characters", ErrInvalidInput, maxDisplayName)
+		return &InputError{"display_name_long"}
 	}
 	if email != "" && (len(email) > maxEmail || !strings.Contains(email, "@")) {
-		return fmt.Errorf("%w: not an email address", ErrInvalidInput)
+		return &InputError{"email_invalid"}
 	}
 	return s.store.UpdateProfile(ctx, userID, displayName, email)
 }
@@ -234,13 +244,13 @@ func (s *Service) Sweep(ctx context.Context) (int64, error) {
 
 func checkNewPassword(password, confirm string) error {
 	if utf8.RuneCountInString(password) < minPassword {
-		return fmt.Errorf("%w: password must be at least %d characters", ErrInvalidInput, minPassword)
+		return &InputError{"password_short"}
 	}
 	if len(password) > 72 { // bcrypt's limit
-		return fmt.Errorf("%w: password must be at most 72 bytes", ErrInvalidInput)
+		return &InputError{"password_long"}
 	}
 	if password != confirm {
-		return fmt.Errorf("%w: passwords don't match", ErrInvalidInput)
+		return &InputError{"password_mismatch"}
 	}
 	return nil
 }

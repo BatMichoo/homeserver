@@ -1,0 +1,58 @@
+{{ define "auth/account" }}
+<div class="auth-panel">
+  <h1>{{ t .Lang "account.title" }}</h1>
+  <p class="auth-who">{{ t .Lang "account.signed_in_as" }} <strong>{{ .User.Username }}</strong></p>
+
+  <section class="sheet" id="profile">
+    <form class="sheet-form" method="post" action="/account">
+      <h2>{{ t .Lang "account.profile" }}</h2>
+      {{ if eq .Form "profile" }}{{ template "auth/message" . }}{{ end }}
+      <div>
+        <label for="display_name">{{ t .Lang "account.display_name" }}</label>
+        <input type="text" id="display_name" name="display_name" value="{{ .User.DisplayName }}" maxlength="60" autocomplete="name" />
+        <small>{{ t .Lang "account.display_name_hint" }}</small>
+      </div>
+      <div>
+        <label for="email">{{ t .Lang "account.email" }}</label>
+        <input type="email" id="email" name="email" value="{{ .User.Email }}" maxlength="254" autocomplete="email" />
+      </div>
+      <div class="sheet-actions">
+        <button type="submit" class="btn-primary sheet-save">{{ t .Lang "account.save" }}</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="sheet" id="password">
+    <form class="sheet-form" method="post" action="/account/password">
+      <h2>{{ t .Lang "account.password" }}</h2>
+      {{ if eq .Form "password" }}{{ template "auth/message" . }}{{ end }}
+      <div>
+        <label for="current_password">{{ t .Lang "account.current_password" }}</label>
+        <input type="password" id="current_password" name="current_password" autocomplete="current-password" required />
+      </div>
+      <div>
+        <label for="new_password">{{ t .Lang "account.new_password" }}</label>
+        <input type="password" id="new_password" name="new_password" autocomplete="new-password" minlength="6" required />
+      </div>
+      <div>
+        <label for="confirm_new">{{ t .Lang "confirm_password" }}</label>
+        <input type="password" id="confirm_new" name="confirm_password" autocomplete="new-password" minlength="6" required />
+      </div>
+      <div class="sheet-actions">
+        <button type="submit" class="btn-primary sheet-save">{{ t .Lang "account.change_password" }}</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="sheet" id="sessions">
+    <form class="sheet-form" method="post" action="/account/sessions">
+      <h2>{{ t .Lang "account.sessions" }}</h2>
+      {{ if eq .Form "sessions" }}{{ template "auth/message" . }}{{ end }}
+      <p>{{ t .Lang "account.sessions_hint" }}</p>
+      <div class="sheet-actions">
+        <button type="submit" class="sheet-delete">{{ t .Lang "account.end_sessions" }}</button>
+      </div>
+    </form>
+  </section>
+</div>
+{{ end }}

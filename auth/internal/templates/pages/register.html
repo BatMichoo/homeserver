@@ -1,0 +1,31 @@
+{{ define "auth/register" }}
+<div class="auth-panel">
+  <h1>{{ t .Lang "register.title" }}</h1>
+  <div class="sheet">
+    <form class="sheet-form" method="post" action="/register">
+      {{ template "auth/message" . }}
+      <input type="hidden" name="next" value="{{ .Next }}" />
+      <div>
+        <label for="username">{{ t .Lang "username" }}</label>
+        <input type="text" id="username" name="username" value="{{ .Username }}" autocomplete="username"
+          minlength="3" maxlength="50" required autofocus />
+      </div>
+      <div>
+        <label for="password">{{ t .Lang "password" }}</label>
+        <input type="password" id="password" name="password" autocomplete="new-password" minlength="6" required />
+      </div>
+      <div>
+        <label for="confirm_password">{{ t .Lang "confirm_password" }}</label>
+        <input type="password" id="confirm_password" name="confirm_password" autocomplete="new-password" minlength="6" required />
+      </div>
+      <div class="sheet-actions">
+        <button type="submit" class="btn-primary sheet-save">{{ t .Lang "register.submit" }}</button>
+      </div>
+    </form>
+  </div>
+  <p class="auth-switch">
+    {{ t .Lang "register.have_account" }}
+    <a href="/login{{ if .Next }}?next={{ .Next }}{{ end }}">{{ t .Lang "register.login" }}</a>
+  </p>
+</div>
+{{ end }}

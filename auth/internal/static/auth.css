@@ -1,0 +1,58 @@
+/* Layout of the auth pages, on top of the shared theme. */
+.auth-panel {
+  width: min(28rem, 100%);
+  margin: 2rem auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  text-align: left;
+}
+
+.auth-panel h1 {
+  font-size: 1.5rem;
+  color: var(--text);
+  text-align: center;
+}
+
+.auth-panel h2 {
+  font-size: 1.1rem;
+  color: var(--text);
+}
+
+.auth-panel .sheet {
+  border-radius: var(--radius);
+  background-color: var(--bg-light);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.auth-panel .sheet-form small,
+.auth-who,
+.auth-switch {
+  color: var(--text-muted);
+}
+
+.auth-who,
+.auth-switch {
+  text-align: center;
+}
+
+.auth-switch a {
+  color: var(--text-sec);
+  font-weight: 600;
+}
+
+.form-error,
+.form-ok {
+  padding: 0.6em 0.8em;
+  border-radius: 0.5em;
+  color: var(--text);
+}
+
+.form-error {
+  background-color: color-mix(in oklch, var(--danger) 25%, transparent);
+}
+
+.form-ok {
+  background-color: color-mix(in oklch, var(--success) 25%, transparent);
+}

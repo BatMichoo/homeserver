@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/BatMichoo/homeserver/auth/internal/accounts"
 	"github.com/gin-gonic/gin"
 )
 
@@ -16,10 +17,14 @@ type Pinger interface {
 
 // Deps is everything the handlers need, built once in main.
 type Deps struct {
-	DB Pinger
+	DB        Pinger
+	Accounts  *accounts.Service
+	LanDomain string // cookies are set for it; logins only return to it
+	PublicURL string // e.g. https://auth.homeserver.lan
 }
 
-// NewRouter wires every route.
+// NewRouter is the base router with the health check; NewWebRouter adds
+// the pages.
 func NewRouter(d Deps) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
