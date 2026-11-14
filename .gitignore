@@ -1,0 +1,7 @@
+.env
+nginx/certs/
+ca-backup.tgz
+*.key
+*.crt
+docs/
+.superpowers/
