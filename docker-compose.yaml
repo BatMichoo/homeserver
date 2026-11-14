@@ -1,0 +1,27 @@
+name: homeserver
+
+services:
+  # Issues nginx's TLS certificate from a private home CA, then exits. Runs
+  # on every `up` (nginx waits for it) but only issues a new certificate when
+  # needed; see certs/issue-certs.sh. The CA's key stays in the ca-data volume.
+  certs:
+    build:
+      context: ./certs
+    environment:
+      COUNTRY_ISO: ${COUNTRY_ISO:-}
+      PROVINCE: ${PROVINCE:-}
+      CITY: ${CITY:-}
+      ORG_NAME: ${ORG_NAME:-}
+      LAN_DOMAIN: ${LAN_DOMAIN:-}
+      LAN_IP: ${LAN_IP:-}
+      OUT_UID: ${CERTS_UID:-1000}
+      OUT_GID: ${CERTS_GID:-1000}
+    volumes:
+      - ca-data:/ca
+      - ${CERTS_DIR:-./nginx/certs}:/out
+    restart: "no"
+
+volumes:
+  # The home CA: back it up (make ca-backup). Losing it means every device
+  # has to trust a new CA.
+  ca-data:
