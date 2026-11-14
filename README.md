@@ -49,6 +49,7 @@ why (usually a missing `LAN_DOMAIN` or `LAN_IP`).
 | `LAN_DOMAIN` | Domain the home server is reached at; apps live on its subdomains | `homeserver.lan` |
 | `LAN_IP` | This server's LAN IP | `192.168.1.123` |
 | `CERTS_UID`, `CERTS_GID` | Owner of the files in `nginx/certs` (default 1000) | `1000` |
+| `HTTP_PORT`, `HTTPS_PORT` | Ports nginx listens on (default 80 and 443); redirects keep a non-default HTTPS port | `8443` |
 
 ## TLS Certificate
 
@@ -91,10 +92,23 @@ drop a file with a `server` block for its name (e.g.
 `server_name auth.homeserver.lan;`) and run `docker compose restart nginx`.
 The certificate already covers every subdomain of `LAN_DOMAIN`.
 
+Every `server` block includes the security headers:
+
+```nginx
+include /etc/nginx/snippets/security-headers.conf;
+```
+
+`make check` fails if one doesn't. A `location` that sets its own
+`add_header` must include it again: nginx drops inherited `add_header`
+lines as soon as a block sets one. To redirect to HTTPS, use
+`https://$host$https_port_suffix$request_uri` so a non-default
+`HTTPS_PORT` is kept.
+
 ## Checks
 
-- `make check`: lints the shell scripts, validates the compose file, and
-  runs `nginx -t` against a throwaway certificate.
+- `make check`: lints the shell scripts, validates the compose file,
+  checks every site includes the security headers, and runs `nginx -t`
+  against a throwaway certificate.
 - `make smoke`: starts the whole stack under a throwaway project (its own
   CA volume, certificate folder and ports 18080/18443), checks the
   certificate and nginx's answers, then removes it all.

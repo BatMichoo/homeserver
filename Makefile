@@ -36,6 +36,7 @@ down:
 check:
 	$(SHELLCHECK) certs/issue-certs.sh scripts/*.sh
 	docker compose --env-file .env.template config -q
+	scripts/check-sites.sh
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
 	openssl req -x509 -newkey rsa:2048 -noenc -days 1 -subj /CN=check \
 		-keyout "$$tmp/homeserver.lan.key" -out "$$tmp/homeserver.lan.crt" 2>/dev/null && \
@@ -44,6 +45,9 @@ check:
 		-v "$(CURDIR)/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
 		-v "$(CURDIR)/nginx/ssl-params.conf:/etc/nginx/ssl-params.conf:ro" \
 		-v "$(CURDIR)/nginx/sites:/etc/nginx/sites:ro" \
+		-v "$(CURDIR)/nginx/snippets:/etc/nginx/snippets:ro" \
+		-v "$(CURDIR)/nginx/templates:/etc/nginx/templates:ro" \
+		-e HTTPS_PORT=443 \
 		-v "$$tmp:/etc/nginx/certs:ro" \
 		nginx:stable-alpine nginx -t
 

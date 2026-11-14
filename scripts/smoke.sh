@@ -5,6 +5,10 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
+# Settings exported in the caller's shell would override the env file below.
+unset COUNTRY_ISO PROVINCE CITY ORG_NAME LAN_DOMAIN LAN_IP CERTS_UID CERTS_GID \
+	COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES
+
 project=homeserver-smoke
 tmp=$(mktemp -d)
 export CERTS_DIR="$tmp/certs" HTTP_PORT=18080 HTTPS_PORT=18443
@@ -71,10 +75,11 @@ https() { curl -s --cacert "$ca" --resolve "homeserver.lan:$HTTPS_PORT:127.0.0.1
 curl -s "http://127.0.0.1:$HTTP_PORT/rootCA.crt" | cmp -s - "$ca" ||
 	fail "nginx: /rootCA.crt is not the CA certificate"
 
-# Everything else over HTTP redirects to HTTPS, same host and path.
+# Everything else over HTTP redirects to HTTPS: same host, path and query,
+# and HTTPS_PORT when it isn't 443.
 redirect=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "http://127.0.0.1:$HTTP_PORT/x?y=1")
 case "$redirect" in
-"301 https://127.0.0.1/x?y=1") ;;
+"301 https://127.0.0.1:$HTTPS_PORT/x?y=1") ;;
 *) fail "nginx: HTTP not redirected to HTTPS ($redirect)" ;;
 esac
 
@@ -105,4 +110,13 @@ sleep 1 # nginx reloads its workers in the background
 served=$(echo | openssl s_client -connect "127.0.0.1:$HTTPS_PORT" -servername homeserver.lan 2>/dev/null | serial)
 [ "$served" = "$(serial <"$CERTS_DIR/homeserver.lan.crt")" ] ||
 	fail "nginx: still serving the old certificate after make certs ($served)"
+
+# Every response carries the security headers and doesn't name nginx's version.
+for url in "http://127.0.0.1:$HTTP_PORT/rootCA.crt" "http://127.0.0.1:$HTTP_PORT/x" \
+	"https://homeserver.lan:$HTTPS_PORT/" "https://homeserver.lan:$HTTPS_PORT/nope"; do
+	headers=$(https -s -o /dev/null -D - "$url" | tr -d '\r')
+	for h in "X-Frame-Options: DENY" "X-Content-Type-Options: nosniff" "X-XSS-Protection: 1; mode=block" "Server: nginx"; do
+		echo "$headers" | grep -qx "$h" || fail "nginx: $url lacks '$h'"
+	done
+done
 echo "nginx: ok"

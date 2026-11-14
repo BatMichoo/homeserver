@@ -1,0 +1,7 @@
+# Filled in by the nginx image at start (envsubst) from HTTPS_PORT:
+# $https_port_suffix is "" for 443, else ":<port>", for HTTP -> HTTPS
+# redirects that keep a non-default port.
+map "${HTTPS_PORT}" $https_port_suffix {
+    "443"   "";
+    default ":${HTTPS_PORT}";
+}
