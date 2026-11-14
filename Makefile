@@ -34,7 +34,7 @@ down:
 # check validates the scripts and configuration without starting anything.
 # nginx -t runs against a throwaway certificate.
 check:
-	$(SHELLCHECK) certs/issue-certs.sh scripts/*.sh
+	$(SHELLCHECK) certs/issue-certs.sh db/setup.sh scripts/*.sh
 	docker compose --env-file .env.template config -q
 	scripts/check-sites.sh
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \

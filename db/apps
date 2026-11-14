@@ -1,0 +1,3 @@
+# One app database per line. Each gets a role and a database with that
+# name, and its password from <NAME>_DB_PASSWORD in .env.
+auth

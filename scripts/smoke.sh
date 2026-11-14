@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 
 # Settings exported in the caller's shell would override the env file below.
 unset COUNTRY_ISO PROVINCE CITY ORG_NAME LAN_DOMAIN LAN_IP CERTS_UID CERTS_GID \
+	POSTGRES_PASSWORD AUTH_DB_PASSWORD SESSION_TTL \
 	COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES
 
 project=homeserver-smoke
@@ -22,6 +23,8 @@ LAN_DOMAIN=homeserver.lan
 LAN_IP=127.0.0.1
 CERTS_UID=$(id -u)
 CERTS_GID=$(id -g)
+POSTGRES_PASSWORD=smoke-root
+AUTH_DB_PASSWORD=smoke-auth
 ENV
 
 compose() { docker compose -p "$project" --env-file "$tmp/env" "$@"; }
@@ -63,6 +66,33 @@ if docker compose -p "$project" --env-file "$tmp/env-no-ip" run --rm certs >/dev
 	fail "certs: ran without LAN_IP"
 fi
 echo "certs: ok"
+
+# --- db --------------------------------------------------------------------
+# db-setup creates each app's database and role, and is safe to rerun: it
+# only (re)sets passwords from .env.
+out=$(compose run --rm db-setup 2>&1) || fail "db: first db-setup failed: $out"
+echo "$out" | grep -q 'created auth' || fail "db: auth not created: $out"
+out=$(compose run --rm db-setup 2>&1) || fail "db: second db-setup failed: $out"
+echo "$out" | grep -q 'ok auth' || fail "db: second run not ok: $out"
+if echo "$out" | grep -q created; then fail "db: second run created something: $out"; fi
+# Over the network, as the auth service connects (inside the db container
+# the image trusts local connections, so any password would work there).
+psql_as() {
+	compose run --rm -T --no-deps -e PGPASSWORD="$1" --entrypoint psql db-setup \
+		-h db -U auth -d auth -tAc 'select 1' >/dev/null 2>&1
+}
+psql_as smoke-auth || fail "db: auth can't log in"
+
+sed -i 's/^AUTH_DB_PASSWORD=.*/AUTH_DB_PASSWORD=smoke-auth-2/' "$tmp/env"
+compose run --rm db-setup >/dev/null 2>&1 || fail "db: db-setup after password change failed"
+psql_as smoke-auth-2 || fail "db: new password not applied"
+if psql_as smoke-auth; then fail "db: old password still works"; fi
+
+sed 's/^AUTH_DB_PASSWORD=.*/AUTH_DB_PASSWORD=/' "$tmp/env" >"$tmp/env-no-pw"
+if docker compose -p "$project" --env-file "$tmp/env-no-pw" run --rm db-setup >/dev/null 2>&1; then
+	fail "db: db-setup ran without AUTH_DB_PASSWORD"
+fi
+echo "db: ok"
 
 # --- nginx ---------------------------------------------------------------
 compose up -d --build --wait nginx >/dev/null 2>&1 || fail "nginx: did not start"

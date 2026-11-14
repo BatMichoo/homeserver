@@ -41,7 +41,41 @@ services:
       - ${CERTS_DIR:-./nginx/certs}:/out
     restart: "no"
 
+  # Postgres for the home server's services. Each gets its own database and
+  # role, made by db-setup.
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Creates each app's database and role (db/apps) and sets their passwords
+  # from .env, then exits. Runs on every `up`; safe to repeat.
+  db-setup:
+    image: postgres:16-alpine
+    entrypoint: ["/db/setup.sh"]
+    environment:
+      PGHOST: db
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD:-}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:-}
+    volumes:
+      - ./db:/db:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
 volumes:
+  # The home server's databases (back them up!).
+  db-data:
   # The home CA: back it up (make ca-backup). Losing it means every device
   # has to trust a new CA.
   ca-data:
