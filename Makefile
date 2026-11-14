@@ -36,7 +36,7 @@ down:
 check:
 	$(SHELLCHECK) certs/issue-certs.sh db/setup.sh scripts/*.sh
 	docker compose --env-file .env.template config -q
-	scripts/check-sites.sh
+	scripts/check-sites.sh nginx/sites/*.conf scripts/smoke/whoami.conf
 	@test -z "$$(gofmt -l auth)" || { gofmt -l auth; echo "run gofmt on the files above"; exit 1; }
 	cd auth && go vet ./...
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \

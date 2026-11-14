@@ -7,7 +7,8 @@ set -eu
 cd "$(dirname "$0")/.."
 
 status=0
-for f in nginx/sites/*.conf; do
+[ $# -gt 0 ] || set -- nginx/sites/*.conf
+for f in "$@"; do
 	servers=$(grep -cE '^[[:space:]]*server[[:space:]]*\{' "$f" || true)
 	included=$(grep -cE '^[[:space:]]*include[[:space:]]+/etc/nginx/snippets/security-headers\.conf;' "$f" || true)
 	if [ "$servers" -ne "$included" ]; then

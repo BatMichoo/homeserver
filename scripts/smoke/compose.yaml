@@ -1,0 +1,7 @@
+# Smoke test only: nginx gets the real sites plus whoami.conf, from a copy
+# smoke.sh makes in SMOKE_SITES (same mount target, so it replaces the
+# real sites mount).
+services:
+  nginx:
+    volumes:
+      - ${SMOKE_SITES:?}:/etc/nginx/sites:ro

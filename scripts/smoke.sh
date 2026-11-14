@@ -27,8 +27,14 @@ POSTGRES_PASSWORD=smoke-root
 AUTH_DB_PASSWORD=smoke-auth
 ENV
 
-compose() { docker compose -p "$project" --env-file "$tmp/env" "$@"; }
-mk() { make -s "$@" COMPOSE="docker compose -p $project --env-file $tmp/env" >/dev/null 2>&1; }
+# The smoke override adds a test-only site (scripts/smoke/whoami.conf).
+export SMOKE_SITES="$tmp/sites"
+mkdir -p "$SMOKE_SITES"
+cp nginx/sites/*.conf scripts/smoke/whoami.conf "$SMOKE_SITES/"
+files="-f docker-compose.yaml -f scripts/smoke/compose.yaml"
+# shellcheck disable=SC2086 # files is a list of flags
+compose() { docker compose -p "$project" $files --env-file "$tmp/env" "$@"; }
+mk() { make -s "$@" COMPOSE="docker compose -p $project $files --env-file $tmp/env" >/dev/null 2>&1; }
 
 cleanup() {
 	compose down -v --remove-orphans >/dev/null 2>&1 || true
@@ -62,7 +68,8 @@ compose run --rm certs >/dev/null 2>&1 || fail "certs: second run failed"
 	fail "certs: certificate reissued on second run"
 
 grep -v '^LAN_IP=' "$tmp/env" >"$tmp/env-no-ip"
-if docker compose -p "$project" --env-file "$tmp/env-no-ip" run --rm certs >/dev/null 2>&1; then
+# shellcheck disable=SC2086
+if docker compose -p "$project" $files --env-file "$tmp/env-no-ip" run --rm certs >/dev/null 2>&1; then
 	fail "certs: ran without LAN_IP"
 fi
 echo "certs: ok"
@@ -89,7 +96,8 @@ psql_as smoke-auth-2 || fail "db: new password not applied"
 if psql_as smoke-auth; then fail "db: old password still works"; fi
 
 sed 's/^AUTH_DB_PASSWORD=.*/AUTH_DB_PASSWORD=/' "$tmp/env" >"$tmp/env-no-pw"
-if docker compose -p "$project" --env-file "$tmp/env-no-pw" run --rm db-setup >/dev/null 2>&1; then
+# shellcheck disable=SC2086
+if docker compose -p "$project" $files --env-file "$tmp/env-no-pw" run --rm db-setup >/dev/null 2>&1; then
 	fail "db: db-setup ran without AUTH_DB_PASSWORD"
 fi
 echo "db: ok"
@@ -159,3 +167,48 @@ for p in /verify /redirect-to-login; do
 	[ "$(authc -o /dev/null -w '%{http_code}' "$auth_url$p")" = 404 ] || fail "auth: $p reachable from outside"
 done
 echo "auth: up"
+
+# Logging in through auth.<domain>, and a site protected by
+# snippets/require-login.conf (whoami.<domain> echoes the user headers it
+# receives as "<id>|<name>").
+jar="$tmp/jar"
+who="https://whoami.homeserver.lan:$HTTPS_PORT"
+whoc() { curl -s --cacert "$ca" --resolve "whoami.homeserver.lan:$HTTPS_PORT:127.0.0.1" "$@"; }
+post() { authc -b "$jar" -c "$jar" -H "Origin: https://auth.homeserver.lan" -o /dev/null -w '%{http_code} %{redirect_url}' "$@"; }
+
+r=$(whoc -o /dev/null -w '%{http_code} %{redirect_url}' "$who/page?x=1")
+[ "$r" = "302 $auth_url/login?next=https%3A%2F%2Fwhoami.homeserver.lan%3A$HTTPS_PORT%2Fpage%3Fx%3D1" ] ||
+	fail "auth: anonymous page load not sent to login ($r)"
+h=$(whoc -o /dev/null -D - -H 'HX-Request: true' -H "HX-Current-URL: $who/full" "$who/fragment" | tr -d '\r')
+echo "$h" | grep -q '^HTTP/[0-9.]* 401' || fail "auth: htmx request not 401"
+echo "$h" | grep -qix "HX-Redirect: $auth_url/login?next=https%3A%2F%2Fwhoami.homeserver.lan%3A$HTTPS_PORT%2Ffull" ||
+	fail "auth: htmx request has no HX-Redirect to login: $h"
+[ "$(whoc -o /dev/null -w '%{http_code}' -H 'X-User-Id: forged' "$who/")" = 302 ] ||
+	fail "auth: a forged X-User-Id got through without a session"
+
+r=$(post -d username=smoke-user -d password=secret1 -d confirm_password=secret1 "$auth_url/register")
+[ "$r" = "303 $auth_url/account" ] || fail "auth: register ($r)"
+body=$(whoc -b "$jar" -H 'X-User-Id: forged' -H 'X-User-Name: forged' "$who/")
+id=${body%%|*}
+echo "$id" | grep -Eq '^[0-9a-f-]{36}$' || fail "auth: whoami got no user id ($body)"
+[ "$body" = "$id|smoke-user" ] || fail "auth: whoami got '$body'"
+
+post -d display_name=Иван -d email= "$auth_url/account" >/dev/null
+[ "$(whoc -b "$jar" "$who/")" = "$id|%D0%98%D0%B2%D0%B0%D0%BD" ] || fail "auth: display name not passed encoded"
+
+headers=$(whoc -b "$jar" -s -o /dev/null -D - "$who/" | tr -d '\r')
+for hdr in "X-Frame-Options: DENY" "X-Content-Type-Options: nosniff" "X-XSS-Protection: 1; mode=block"; do
+	echo "$headers" | grep -qx "$hdr" || fail "auth: whoami lacks '$hdr'"
+done
+
+r=$(post -X POST "$auth_url/logout")
+[ "$r" = "303 $auth_url/login" ] || fail "auth: logout ($r)"
+[ "$(whoc -b "$jar" -o /dev/null -w '%{http_code}' "$who/")" = 302 ] || fail "auth: still in after logout"
+
+r=$(post -d username=smoke-user -d password=wrong "$auth_url/login")
+[ "${r%% *}" = 401 ] || fail "auth: wrong password accepted ($r)"
+r=$(post -d username=smoke-user -d password=secret1 --data-urlencode next=https://evil.com/ "$auth_url/login")
+[ "$r" = "303 $auth_url/account" ] || fail "auth: unsafe next followed ($r)"
+r=$(authc -b "$jar" -H "Origin: https://evil.com" -o /dev/null -w '%{http_code}' -X POST "$auth_url/logout")
+[ "$r" = 403 ] || fail "auth: cross-site logout allowed ($r)"
+echo "auth: ok"
