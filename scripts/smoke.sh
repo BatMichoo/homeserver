@@ -279,6 +279,12 @@ r=$(post -d username=smoke-user -d password=secret1 --data-urlencode next=https:
 [ "$r" = "303 $auth_url/account" ] || fail "auth: unsafe next followed ($r)"
 r=$(authc -b "$jar" -H "Origin: https://evil.com" -o /dev/null -w '%{http_code}' -X POST "$auth_url/logout")
 [ "$r" = 403 ] || fail "auth: cross-site logout allowed ($r)"
+# The dashboard's health routes and its link to the login site (by IP too).
+[ "$(https "https://homeserver.lan:$HTTPS_PORT/status/auth")" = ok ] || fail "nginx: /status/auth"
+https -s -o /dev/null -D - "https://homeserver.lan:$HTTPS_PORT/status/auth" | tr -d '\r' |
+	grep -qx "Cache-Control: no-store" || fail "nginx: /status/auth is cacheable"
+r=$(curl -s --cacert "$ca" -o /dev/null -w '%{http_code} %{redirect_url}' "https://127.0.0.1:$HTTPS_PORT/go/auth")
+[ "$r" = "302 $auth_url/" ] || fail "nginx: /go/auth by IP ($r)"
 echo "auth: ok"
 
 # --- media ------------------------------------------------------------------
@@ -317,6 +323,14 @@ head -c $((10 * 1024 * 1024 - 1024)) /dev/zero >"$tmp/big.torrent"
 code=$(mediac -b "$jar" -H "Origin: $media_url" -o /dev/null -w '%{http_code}' -F kind=movie -F title=Big -F year=2000 \
 	-F "torrent=@$tmp/big.torrent" "$media_url/add")
 [ "$code" != 413 ] || fail "media: nginx refuses a 10 MB .torrent"
+[ "$(https "https://homeserver.lan:$HTTPS_PORT/status/media")" = ok ] || fail "media: /status/media"
+# A stopped app shows as down on the dashboard, quickly.
+compose stop media >/dev/null 2>&1
+start=$(date +%s)
+code=$(https -o /dev/null -w '%{http_code}' "https://homeserver.lan:$HTTPS_PORT/status/media")
+[ "$code" != 200 ] || fail "media: /status/media says ok while stopped"
+[ $(($(date +%s) - start)) -le 5 ] || fail "media: /status/media took over 5s while stopped"
+compose start media >/dev/null 2>&1
 echo "media: ok"
 
 # --- expenser ---------------------------------------------------------------
