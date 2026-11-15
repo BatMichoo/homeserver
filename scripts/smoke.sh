@@ -304,5 +304,12 @@ for svc in jellyfin:8096 transmission:9091; do
 		fail "media: ${svc%:*}'s port ${svc#*:} is published"
 	fi
 done
-https -s "https://homeserver.lan:$HTTPS_PORT/" | grep -q 'id="media-link"' || fail "media: the dashboard doesn't link to it"
+https -s "https://homeserver.lan:$HTTPS_PORT/" | grep -q 'href="/go/media"' || fail "media: the dashboard doesn't link to it"
+r=$(https -o /dev/null -w '%{http_code} %{redirect_url}' "https://homeserver.lan:$HTTPS_PORT/go/media")
+[ "$r" = "302 $media_url/" ] || fail "media: /go/media doesn't lead to it ($r)"
+# A .torrent of nearly 10 MB reaches the app (which answers), not nginx's 413.
+head -c $((10 * 1024 * 1024 - 1024)) /dev/zero >"$tmp/big.torrent"
+code=$(mediac -b "$jar" -H "Origin: $media_url" -o /dev/null -w '%{http_code}' -F kind=movie -F title=Big -F year=2000 \
+	-F "torrent=@$tmp/big.torrent" "$media_url/add")
+[ "$code" != 413 ] || fail "media: nginx refuses a 10 MB .torrent"
 echo "media: ok"

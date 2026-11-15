@@ -151,7 +151,7 @@
           <section class="card">
             <h2>Services</h2>
             <ul class="services">
-              <li><a id="media-link" href="/">Media</a>: films and series, and downloads</li>
+              <li><a href="/go/media">Media</a>: films and series, and downloads</li>
             </ul>
           </section>
 
@@ -190,9 +190,6 @@
       setInterval(updateClock, 1000);
       document.getElementById("year").textContent = new Date().getFullYear();
       document.getElementById("address").textContent = location.host;
-      // Apps live on subdomains of this one (same port).
-      document.getElementById("media-link").href =
-        location.protocol + "//media." + location.hostname + (location.port ? ":" + location.port : "") + "/";
 
       // Server panel: the deployer's status (deploy/), refreshed every minute.
       const results = {

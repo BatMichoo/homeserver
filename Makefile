@@ -34,7 +34,7 @@ LOCK := flock -w 600 .deploy/lock
 
 # The media folder (MEDIA_DIR in .env, else ./media-data). Its folders are
 # made here, so they belong to you rather than to Docker's root.
-MEDIA_FOLDER = $$(v=$$(sed -n 's/^MEDIA_DIR=//p' .env 2>/dev/null | tail -1); echo "$${v:-./media-data}")
+MEDIA_FOLDER = $$(v=$$(sed -n 's/^MEDIA_DIR=//p' .env 2>/dev/null | tail -1 | tr -d "\"'"); echo "$${v:-./media-data}")
 
 up:
 	@mkdir -p $(CERT_FOLDER) .deploy/public
@@ -65,7 +65,7 @@ check:
 		-v "$(CURDIR)/nginx/sites:/etc/nginx/sites:ro" \
 		-v "$(CURDIR)/nginx/snippets:/etc/nginx/snippets:ro" \
 		-v "$(CURDIR)/nginx/templates:/etc/nginx/templates:ro" \
-		-e HTTPS_PORT=443 \
+		-e HTTPS_PORT=443 -e LAN_DOMAIN=homeserver.lan \
 		-v "$$tmp:/etc/nginx/certs:ro" \
 		--add-host auth:127.0.0.1 \
 		nginx:stable-alpine nginx -t

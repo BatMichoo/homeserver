@@ -1,0 +1,5 @@
+# Filled in by the nginx image at start (envsubst) from LAN_DOMAIN:
+# $lan_domain is the domain the apps live under (media.$lan_domain, ...).
+map "" $lan_domain {
+    default "${LAN_DOMAIN}";
+}
