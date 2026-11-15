@@ -145,6 +145,13 @@ func (c Client) PrepareAll(ctx context.Context) error {
 	return err
 }
 
+// PruneImages deletes dangling images left by deploys (held images are
+// tagged, so they're kept).
+func (c Client) PruneImages(ctx context.Context) error {
+	_, err := c.R.Run(ctx, c.Dir, nil, "docker", "image", "prune", "-f")
+	return err
+}
+
 // Tag gives an image an extra name (a held service's image, so pruning
 // can't delete it).
 func (c Client) Tag(ctx context.Context, image, ref string) error {

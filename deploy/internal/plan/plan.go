@@ -97,8 +97,15 @@ func changeReasons(old, new compose.Service, files []string) []string {
 	if !sameJSON(old.Raw, new.Raw) {
 		reasons = append(reasons, ReasonDefinition)
 	}
-	if new.BuildContext != "" && anyUnder(files, new.BuildContext) {
-		reasons = append(reasons, ReasonBuild)
+	paths := new.BuildPaths
+	if len(paths) == 0 && new.BuildContext != "" {
+		paths = []string{new.BuildContext}
+	}
+	for _, p := range paths {
+		if anyUnder(files, p) {
+			reasons = append(reasons, ReasonBuild)
+			break
+		}
 	}
 	for _, m := range new.Mounts {
 		if m.Type == "bind" && anyUnder(files, m.Source) {
@@ -116,7 +123,10 @@ func changeReasons(old, new compose.Service, files []string) []string {
 // only submodules can contain another path.
 func anyUnder(files []string, path string) bool {
 	path = strings.TrimSuffix(strings.TrimPrefix(path, "./"), "/")
-	if path == "" || path == "." || strings.HasPrefix(path, "/") || strings.HasPrefix(path, "..") {
+	if path == "." {
+		return len(files) > 0 // the whole repository
+	}
+	if path == "" || strings.HasPrefix(path, "/") || strings.HasPrefix(path, "..") {
 		return false // outside the repository: git can't see it change
 	}
 	for _, f := range files {

@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -69,7 +70,7 @@ func TestStatusShape(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		s.Add(Event{Time: t0, Kind: "deployed", Message: "x"})
 	}
-	require.NoError(t, WriteStatus(dir, s))
+	require.NoError(t, WriteStatus(dir, s, t0))
 	b, err := os.ReadFile(filepath.Join(dir, "public", "status.json"))
 	require.NoError(t, err)
 	assert.NotContains(t, string(b), "PASSWORD")
@@ -170,4 +171,48 @@ func TestOverrideResolves(t *testing.T) {
 	assert.Equal(t, "always", web["restart"])
 	assert.NotContains(t, web, "build")
 	assert.NotContains(t, web, "ports")
+}
+
+// Held definitions carry interpolated settings (passwords), so state and
+// override are private; status.json is public.
+func TestFilePermissions(t *testing.T) {
+	dir := t.TempDir()
+	s := &State{Held: map[string]Held{"w": {Service: "w", Image: "x", Definition: json.RawMessage(`{"environment":{"P":"secret"}}`)}}}
+	require.NoError(t, s.Save(dir))
+	require.NoError(t, WriteOverride(dir, s.Held, nil))
+	require.NoError(t, WriteStatus(dir, s, t0))
+	for name, want := range map[string]os.FileMode{"state.json": 0o600, "override.yaml": 0o600, "public/status.json": 0o644} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		require.NoError(t, err)
+		assert.Equal(t, want, info.Mode().Perm(), name)
+	}
+}
+
+func TestStatusUsesGivenTime(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, WriteStatus(dir, &State{}, t0))
+	b, _ := os.ReadFile(filepath.Join(dir, "public", "status.json"))
+	assert.Contains(t, string(b), `"updated_at": "2026-11-15T10:00:00Z"`)
+}
+
+func TestSkippedCapped(t *testing.T) {
+	s := &State{}
+	for i := 0; i < 250; i++ {
+		s.Skip(fmt.Sprintf("c%d", i))
+	}
+	assert.Len(t, s.Skipped, 200)
+	assert.True(t, s.IsSkipped("c249"))
+	assert.False(t, s.IsSkipped("c0"), "oldest forgotten")
+}
+
+func TestLockExclusive(t *testing.T) {
+	dir := t.TempDir()
+	unlock, err := Lock(dir, time.Second)
+	require.NoError(t, err)
+	_, err = Lock(dir, 100*time.Millisecond)
+	assert.Error(t, err, "held by someone else")
+	unlock()
+	unlock2, err := Lock(dir, time.Second)
+	require.NoError(t, err)
+	unlock2()
 }

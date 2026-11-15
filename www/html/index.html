@@ -194,6 +194,8 @@
         "ci-failed": "Skipped (CI failed)",
         blocked: "Waiting (checkout can't be updated)",
         "backup-failed": "Waiting (backup failed)",
+        "build-failed": "Waiting (building or pulling images failed; will try again)",
+        "rollback-failed": "Rollback failed (needs a look)",
       };
 
       function ago(iso) {
@@ -222,10 +224,28 @@
           return;
         }
         const d = status.deployed || {};
-        const result = results[status.last_result] || status.last_result || "";
-        summary.textContent = d.commit
-          ? result + ": “" + d.subject + "” (" + d.commit.slice(0, 7) + ", " + ago(d.at) + ")"
-          : result || "No deploys yet.";
+        const running = d.commit
+          ? "“" + d.subject + "” (" + d.commit.slice(0, 7) + ", deployed " + ago(d.at) + ")"
+          : "";
+        const last = (status.events || [])[(status.events || []).length - 1];
+        let text;
+        if (status.last_result === "deployed" || status.last_result === "partial") {
+          text = (results[status.last_result] || "") + ": " + running;
+        } else if (last && last.kind === status.last_result) {
+          // Something went wrong with a newer commit: say which, and what still runs.
+          text =
+            (results[status.last_result] || status.last_result) +
+            (last.commit ? " " + last.commit.slice(0, 7) : "") +
+            ", " + ago(last.time) + ": " + last.message +
+            (running ? ". Running: " + running : "");
+        } else {
+          text = running ? "Running: " + running : "No deploys yet.";
+        }
+        // The deployer refreshes the file every poll (30 minutes by default).
+        if (status.updated_at && Date.now() - new Date(status.updated_at).getTime() > 2 * 3600 * 1000) {
+          text += " The deployer hasn't reported since " + ago(status.updated_at) + "; is it running?";
+        }
+        summary.textContent = text;
 
         held.replaceChildren();
         for (const h of status.held || []) {

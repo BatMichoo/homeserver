@@ -86,7 +86,7 @@ func WriteOverride(dir string, held map[string]Held, newDefs map[string]json.Raw
 			fmt.Fprintf(&b, "    %s: %s\n", k, lines[k])
 		}
 	}
-	return writeAtomic(path, []byte(b.String()))
+	return writeAtomic(path, []byte(b.String()), 0o600) // holds settings (passwords)
 }
 
 // compact is v as one-line JSON (JSON is valid YAML flow syntax).

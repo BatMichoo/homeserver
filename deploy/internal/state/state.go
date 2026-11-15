@@ -14,7 +14,10 @@ import (
 	"time"
 )
 
-const maxEvents = 50
+const (
+	maxEvents  = 50
+	maxSkipped = 200
+)
 
 // Held is a service kept on its previous version after its new one
 // failed.
@@ -38,7 +41,11 @@ type Event struct {
 }
 
 // Deploying marks a deploy in progress, so one cut short can be resumed.
-type Deploying struct{ From, To string }
+// RollingBack is set once undoing it has started.
+type Deploying struct {
+	From, To    string
+	RollingBack bool `json:",omitempty"`
+}
 
 // State is .deploy/state.json.
 type State struct {
@@ -79,7 +86,8 @@ func (s *State) Save(dir string) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(dir, "state.json"), b)
+	// Private: held definitions carry interpolated settings (passwords).
+	return writeAtomic(filepath.Join(dir, "state.json"), b, 0o600)
 }
 
 // Add records an event, keeping the newest 50.
@@ -90,10 +98,22 @@ func (s *State) Add(e Event) {
 	}
 }
 
+// Skip records a commit that must never be deployed (the newest 200 are
+// kept; older ones are far behind the branch anyway).
+func (s *State) Skip(sha string) {
+	if s.IsSkipped(sha) {
+		return
+	}
+	s.Skipped = append(s.Skipped, sha)
+	if len(s.Skipped) > maxSkipped {
+		s.Skipped = s.Skipped[len(s.Skipped)-maxSkipped:]
+	}
+}
+
 // IsSkipped is true for a commit that must never be deployed.
 func (s *State) IsSkipped(sha string) bool { return slices.Contains(s.Skipped, sha) }
 
-func writeAtomic(path string, b []byte) error {
+func writeAtomic(path string, b []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -106,7 +126,7 @@ func writeAtomic(path string, b []byte) error {
 		tmp.Close()
 		return err
 	}
-	if err := tmp.Chmod(0o644); err != nil {
+	if err := tmp.Chmod(mode); err != nil {
 		tmp.Close()
 		return err
 	}

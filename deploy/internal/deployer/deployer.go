@@ -64,6 +64,7 @@ type Compose interface {
 	Remove(ctx context.Context, svc string) error
 	Tag(ctx context.Context, image, ref string) error
 	Untag(ctx context.Context, ref string) error
+	PruneImages(ctx context.Context) error
 }
 
 // CI reports a commit's checks.
@@ -86,7 +87,8 @@ type Deps struct {
 // Deployer deploys commits.
 type Deployer struct {
 	Deps
-	st *state.State
+	st       *state.State
+	lockWait time.Duration // how long to wait for a manual make up to finish
 }
 
 // New loads the state.
@@ -101,7 +103,18 @@ func New(d Deps) (*Deployer, error) {
 	if st.LastRun == nil {
 		st.LastRun = map[string]time.Time{}
 	}
-	return &Deployer{Deps: d, st: st}, nil
+	return &Deployer{Deps: d, st: st, lockWait: 10 * time.Minute}, nil
+}
+
+// lock waits for (and holds) the lock a manual make up also takes.
+func (d *Deployer) lock() (func(), error) {
+	return state.Lock(d.Cfg.StateDir, d.lockWait)
+}
+
+// Touch refreshes status.json, so the dashboard can tell a deployer that
+// stopped running.
+func (d *Deployer) Touch() error {
+	return state.WriteStatus(d.Cfg.StateDir, d.st, d.Now())
 }
 
 func (d *Deployer) event(kind, commit, service, msg string) {
@@ -113,7 +126,7 @@ func (d *Deployer) save() error {
 	if err := d.st.Save(d.Cfg.StateDir); err != nil {
 		return err
 	}
-	return state.WriteStatus(d.Cfg.StateDir, d.st)
+	return state.WriteStatus(d.Cfg.StateDir, d.st, d.Now())
 }
 
 // blocked records why nothing can be deployed, once (not every poll).
@@ -153,6 +166,16 @@ func (d *Deployer) Resume(ctx context.Context) error {
 	if dep == nil {
 		return nil
 	}
+	unlock, err := d.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if dep.RollingBack {
+		files, _ := d.Git.ChangedFiles(ctx, dep.From, dep.To)
+		d.event("resumed", dep.To, "", "a rollback was interrupted; finishing it")
+		return d.rollback(ctx, dep.From, dep.To, d.st.Held, files, "the rollback was interrupted", true)
+	}
 	head, err := d.Git.Head(ctx)
 	if err != nil {
 		return err
@@ -168,6 +191,11 @@ func (d *Deployer) Resume(ctx context.Context) error {
 
 // Poll deploys the remote branch's newest commit, if it may.
 func (d *Deployer) Poll(ctx context.Context) error {
+	unlock, err := d.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if why, err := d.safe(ctx); err != nil || why != "" {
 		if err != nil {
 			return err
@@ -200,7 +228,7 @@ func (d *Deployer) Poll(ctx context.Context) error {
 			d.Log.Printf("CI still running (or GitHub unreachable) for %s", short(remote))
 			return nil
 		case ci.Failure:
-			d.st.Skipped = append(d.st.Skipped, remote)
+			d.st.Skip(remote)
 			d.st.LastResult = "ci-failed"
 			d.event("ci-failed", remote, "", "CI failed; not deploying")
 			return d.save()
@@ -264,6 +292,10 @@ func (d *Deployer) apply(ctx context.Context, from, to string, old compose.Proje
 			d.event("deployer-outdated", to, "", "the deployer changed; run make autodeploy to update it")
 			break
 		}
+		if f == compose.BaseFile {
+			d.event("deployer-outdated", to, "", "docker-compose.yaml changed; if the deployer's own service changed, run make autodeploy")
+			break
+		}
 	}
 
 	// A held service is tried again when the commit changes (or removes) it.
@@ -286,8 +318,9 @@ func (d *Deployer) apply(ctx context.Context, from, to string, old compose.Proje
 		if err := d.Compose.UpAllWait(ctx); err != nil {
 			return shared(strings.Join(p.SharedReasons, ", ") + ": " + err.Error())
 		}
-		return d.finish(ctx, to, heldBefore, nil)
+		return d.finish(ctx, to, heldBefore, nil, true)
 	}
+	built := false
 
 	blocked := map[string]bool{} // held or not run in this deploy; dependents follow
 	for _, c := range p.Changes {
@@ -319,6 +352,10 @@ func (d *Deployer) apply(ctx context.Context, from, to string, old compose.Proje
 			if err := d.Compose.RunOnce(ctx, name); err != nil {
 				return shared(name + ": " + err.Error())
 			}
+			if _, scheduled := s.Labels[LabelEvery]; scheduled {
+				d.st.LastRun[name] = d.Now()
+			}
+			d.reloadDependents(ctx, cur, name)
 			continue
 		}
 		if c.MountsOnly && !wasHeld {
@@ -332,6 +369,7 @@ func (d *Deployer) apply(ctx context.Context, from, to string, old compose.Proje
 		if err != nil {
 			return shared(err.Error())
 		}
+		built = true
 		if err := d.prepare(ctx, s); err != nil {
 			return retry(name+": building or pulling: "+err.Error(), true)
 		}
@@ -374,7 +412,7 @@ func (d *Deployer) apply(ctx context.Context, from, to string, old compose.Proje
 			}
 		}
 	}
-	return d.finish(ctx, to, heldBefore, blocked)
+	return d.finish(ctx, to, heldBefore, blocked, built)
 }
 
 // holdUndeployed keeps a service whose dependency is held on what it runs
@@ -478,6 +516,16 @@ func (d *Deployer) undo(ctx context.Context, from, to string, heldBefore map[str
 	d.Log.Printf("undoing %s: %s", short(to), why)
 	d.releaseTags(ctx, d.st.Held, heldBefore) // tags made in this deploy
 
+	// Recorded before touching anything, so a deployer killed halfway
+	// finishes the rollback on its next start, and never retries the commit.
+	if skip {
+		d.st.Skip(to)
+	}
+	d.st.Deploying = &state.Deploying{From: from, To: to, RollingBack: true}
+	if err := d.save(); err != nil {
+		return err
+	}
+
 	// If the checkout can't be put back, don't bring anything up on the
 	// bad commit: record it and let a person look (Resume retries on the
 	// next start, since Deploying stays set).
@@ -508,9 +556,6 @@ func (d *Deployer) undo(ctx context.Context, from, to string, heldBefore map[str
 			problems = append(problems, fmt.Errorf("previous version unhealthy too: %w", err))
 		}
 	}
-	if skip {
-		d.st.Skipped = append(d.st.Skipped, to)
-	}
 	d.st.Deploying = nil
 	d.st.LastResult = result
 	msg := why
@@ -531,8 +576,13 @@ func (d *Deployer) rollbackFailed(to, why string, err error) error {
 	return d.save()
 }
 
-func (d *Deployer) finish(ctx context.Context, to string, heldBefore map[string]state.Held, blocked map[string]bool) error {
+func (d *Deployer) finish(ctx context.Context, to string, heldBefore map[string]state.Held, blocked map[string]bool, built bool) error {
 	d.releaseTags(ctx, heldBefore, d.st.Held) // holds this deploy released
+	if built {
+		if err := d.Compose.PruneImages(ctx); err != nil {
+			d.Log.Printf("prune images: %v", err)
+		}
+	}
 	subject, _ := d.Git.Subject(ctx, to)
 	d.st.Deployed.Commit, d.st.Deployed.Subject, d.st.Deployed.At = to, subject, d.Now()
 	d.st.Deploying = nil

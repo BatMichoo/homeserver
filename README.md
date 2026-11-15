@@ -246,15 +246,45 @@ This starts the `deployer` container (code in `deploy/`). Every 30 minutes
      versions. It stays held until a later commit changes it again.
    - **A change only to mounted files** (e.g. an nginx site) is checked
      and reloaded in place when the service says how (labels below).
-   - **Shared changes** (networks, volumes, a one-shot like `certs`, a
-     check that fails, a held service whose old version won't start
-     either) put the whole commit back, bring everything up, and skip the
-     commit for good.
+   - **One-shots** (like `certs`) that changed are run, and the services
+     that depend on them are reloaded.
+   - **The whole commit is put back** (everything brought up again, the
+     commit skipped for good) when the change is shared (networks,
+     volumes), a changed one-shot fails, a config check fails, a held
+     service's previous version won't start either, or a failing service
+     has nothing to go back to.
+   - **Building or pulling an image fails** (registry or network down):
+     the commit is put back but not skipped, and tried again next time.
 
-Status is in `.deploy/` (not in git): `state.json`, `override.yaml` (the
-held services' previous versions; `make up` uses it too, so it never
-starts a held-back version), and `public/status.json`, which the dashboard
-shows and nginx serves at `/deploy/status.json`.
+Status is in `.deploy/` (not in git):
+
+- `state.json`: what the deployer remembers.
+- `override.yaml`: the held services' previous versions. `make up` and
+  `make down` use it. **A plain `docker compose up` doesn't**, and would
+  start the held-back versions; use `make up`.
+- `lock`: taken during a deploy and by `make up` / `make down`, so they
+  never overlap.
+- `public/status.json`: what the dashboard shows. nginx serves it at
+  `/deploy/status.json`.
+
+`state.json` and `override.yaml` contain services' settings (passwords
+from `.env`), so only their owner can read them. Unused images are
+pruned after each deploy that built or pulled something.
+
+#### `status.json` (version 1)
+
+For the dashboard and future tools (e.g. a notification service). Fields
+are only added, never renamed, within version 1.
+
+| Field | Meaning |
+|---|---|
+| `version` | `1` |
+| `updated_at` | when the deployer last wrote it (every poll) |
+| `deployed` | `{commit, subject, at}`: the commit last deployed |
+| `last_result` | `deployed`, `partial`, `rolled-back`, `rollback-failed`, `build-failed`, `ci-failed`, `blocked` or `backup-failed` |
+| `held` | `[{service, commit, since, reason}]`: services on their previous version |
+| `cert_expiry` | when the TLS certificate expires, or `null` |
+| `events` | the last 20 `{time, kind, commit, service, message}`, oldest first |
 
 - `make autodeploy-logs` shows what it's doing. `make autodeploy-stop`
   stops it.

@@ -107,7 +107,7 @@ round3=$(push "network and broken alpha")
 deploy
 [ "$(git -C "$server" rev-parse HEAD)" = "$round2" ] || fail "round 3: checkout not rolled back"
 [ "$(result)" = rolled-back ] || fail "round 3: status $(result)"
-grep -q "$round3" "$server/.deploy/state.json" || fail "round 3: commit not skipped"
+grep -Eq "\"Skipped\":\[[^]]*\"$round3\"" "$server/.deploy/state.json" || fail "round 3: commit not skipped"
 [ "$(health alpha)" = healthy ] || fail "round 3: alpha not healthy after the rollback"
 echo "round 3 (shared change rolled back): ok"
 
@@ -133,5 +133,15 @@ deploy
 	fail "round 5: beta's container still there"
 [ "$(cid alpha)" = "$alpha" ] || fail "round 5: alpha was recreated"
 echo "round 5 (service removed): ok"
+
+# 6. Only alpha's mounted config changes: checked and reloaded in place,
+#    the container isn't recreated.
+alpha=$(cid alpha)
+echo changed >"$work/alpha-conf/setting"
+push "alpha config" >/dev/null
+deploy
+[ "$(result)" = deployed ] || fail "round 6: status $(result)"
+[ "$(cid alpha)" = "$alpha" ] || fail "round 6: alpha was recreated for a config change"
+echo "round 6 (config reloaded in place): ok"
 
 echo "deploy-e2e: ok"

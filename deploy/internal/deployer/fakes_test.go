@@ -138,6 +138,10 @@ func (c *fakeCompose) PrepareAll(ctx context.Context) error {
 	}
 	return nil
 }
+func (c *fakeCompose) PruneImages(context.Context) error {
+	c.call("prune")
+	return nil
+}
 func (c *fakeCompose) Tag(ctx context.Context, image, ref string) error {
 	c.call("tag " + ref)
 	c.tags[ref] = image

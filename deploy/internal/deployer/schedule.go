@@ -3,6 +3,8 @@ package deployer
 import (
 	"context"
 	"time"
+
+	"github.com/BatMichoo/homeserver/deploy/internal/compose"
 )
 
 // Schedule runs one-shot services labelled homeserver.every whose time
@@ -13,6 +15,11 @@ import (
 // would run code that never passed CI.
 func (d *Deployer) Schedule(ctx context.Context) error {
 	ctx = context.WithoutCancel(ctx)
+	unlock, err := d.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if why, err := d.safe(ctx); err != nil || why != "" {
 		return err
 	}
@@ -36,16 +43,7 @@ func (d *Deployer) Schedule(ctx context.Context) error {
 			continue
 		}
 		d.st.LastRun[name] = d.Now()
-		for _, other := range p.Order() {
-			o := p.Services[other]
-			reload := o.Labels[LabelReload]
-			if reload == "" || !dependsOn(o.DependsOn, name) {
-				continue
-			}
-			if _, err := d.Compose.Exec(ctx, other, nil, "sh", "-c", reload); err != nil {
-				d.event("scheduled-failed", "", other, "reload after "+name+": "+err.Error())
-			}
-		}
+		d.reloadDependents(ctx, p, name)
 		d.event("scheduled-ok", "", name, "ran on schedule")
 	}
 	if !ran {
@@ -53,6 +51,21 @@ func (d *Deployer) Schedule(ctx context.Context) error {
 	}
 	d.readExpiry(ctx)
 	return d.save()
+}
+
+// reloadDependents runs the reload command of every service that depends
+// on the one-shot name (nginx after certs renewed the certificate).
+func (d *Deployer) reloadDependents(ctx context.Context, p compose.Project, name string) {
+	for _, other := range p.Order() {
+		o := p.Services[other]
+		reload := o.Labels[LabelReload]
+		if reload == "" || !dependsOn(o.DependsOn, name) {
+			continue
+		}
+		if _, err := d.Compose.Exec(ctx, other, nil, "sh", "-c", reload); err != nil {
+			d.event("reload-failed", "", other, "reload after "+name+": "+err.Error())
+		}
+	}
 }
 
 func dependsOn(deps []string, name string) bool {

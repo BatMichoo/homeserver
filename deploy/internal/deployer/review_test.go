@@ -3,9 +3,13 @@ package deployer
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/BatMichoo/homeserver/deploy/internal/compose"
+	"github.com/BatMichoo/homeserver/deploy/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,7 +82,7 @@ func TestPollHeldServiceMountsOnlyRedeploys(t *testing.T) {
 	w.compose.calls = nil
 	w.push("c3", "site", stack(withDef("nginx", `{"image":"nginx:2"}`)), "nginx/sites/a.conf")
 	require.NoError(t, w.d.Poll(ctx))
-	assert.Equal(t, []string{"pull nginx", "up nginx", "untag homeserver-held/nginx:c2"}, w.compose.calls)
+	assert.Equal(t, []string{"pull nginx", "up nginx", "untag homeserver-held/nginx:c2", "prune"}, w.compose.calls)
 	assert.Equal(t, "img-nginx@c3", w.compose.images["nginx"])
 }
 
@@ -189,4 +193,76 @@ func countCalls(calls []string, c string) int {
 		}
 	}
 	return n
+}
+
+// Killed during a rollback, after the checkout was put back: the next
+// start finishes it (brings everything up, never retries the commit).
+func TestResumeDuringRollback(t *testing.T) {
+	w := newWorld(t, stack())
+	w.push("c2", "web", stack(), "web/main.go")
+	s := w.state()
+	s.Deploying = &state.Deploying{From: "c1", To: "c2", RollingBack: true}
+	require.NoError(t, s.Save(w.cfg.StateDir))
+	require.NoError(t, w.newDeployer().Resume(ctx))
+	s = w.state()
+	assert.True(t, s.IsSkipped("c2"))
+	assert.Nil(t, s.Deploying)
+	assert.Contains(t, w.compose.calls, "up-all")
+}
+
+func TestPollPrunesAfterDeploy(t *testing.T) {
+	w := newWorld(t, stack())
+	w.push("c2", "web", stack(), "web/main.go")
+	require.NoError(t, w.d.Poll(ctx))
+	assert.Equal(t, "prune", w.compose.calls[len(w.compose.calls)-1])
+
+	w.compose.calls = nil
+	w.push("c3", "docs", stack(), "README.md")
+	require.NoError(t, w.d.Poll(ctx))
+	assert.NotContains(t, w.compose.calls, "prune", "nothing built, nothing to prune")
+}
+
+func TestPollComposeFileChangedMayOutdateDeployer(t *testing.T) {
+	w := newWorld(t, stack())
+	w.push("c2", "compose", stack(), "docker-compose.yaml")
+	require.NoError(t, w.d.Poll(ctx))
+	var kinds []string
+	for _, e := range w.state().Events {
+		kinds = append(kinds, e.Kind)
+	}
+	assert.Contains(t, kinds, "deployer-outdated")
+}
+
+func TestStatusUsesDeployerClock(t *testing.T) {
+	w := newWorld(t, stack())
+	w.push("c2", "docs", stack(), "README.md")
+	require.NoError(t, w.d.Poll(ctx))
+	b, err := os.ReadFile(filepath.Join(w.cfg.StateDir, "public", "status.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"updated_at": "2026-11-15T10:00:00Z"`)
+}
+
+// Touch refreshes status.json each poll, so the dashboard can tell a
+// deployer that stopped.
+func TestTouchWritesStatus(t *testing.T) {
+	w := newWorld(t, stack())
+	w.now = t0.Add(time.Hour)
+	require.NoError(t, w.d.Touch())
+	b, err := os.ReadFile(filepath.Join(w.cfg.StateDir, "public", "status.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"updated_at": "2026-11-15T11:00:00Z"`)
+}
+
+// A lock keeps a manual make up from running in the middle of a deploy.
+func TestPollHoldsLock(t *testing.T) {
+	w := newWorld(t, stack())
+	unlock, err := state.Lock(w.cfg.StateDir, time.Second)
+	require.NoError(t, err)
+	w.d.lockWait = 100 * time.Millisecond
+	w.push("c2", "web", stack(), "web/main.go")
+	assert.Error(t, w.d.Poll(ctx), "someone else holds the lock")
+	assert.Equal(t, "c1", w.git.head)
+	unlock()
+	require.NoError(t, w.d.Poll(ctx))
+	assert.Equal(t, "c2", w.git.head)
 }

@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -120,8 +121,11 @@ func writeGzip(path string, data []byte) error {
 	return os.Rename(tmp, path)
 }
 
-// prune keeps the newest keep files starting with prefix (names sort by
-// time).
+// dumpName matches <prefix><YYYYMMDD-HHMMSS>-<commit>.sql.gz, so pruning
+// "db-app-" never touches "db-app-old-…".
+var dumpName = regexp.MustCompile(`^\d{8}-\d{6}-[0-9a-f]+\.sql\.gz$`)
+
+// prune keeps the newest keep dumps of one database (names sort by time).
 func prune(dir, prefix string, keep int) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -129,7 +133,7 @@ func prune(dir, prefix string, keep int) error {
 	}
 	var mine []string
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), prefix) && strings.HasSuffix(e.Name(), ".sql.gz") {
+		if rest, ok := strings.CutPrefix(e.Name(), prefix); ok && dumpName.MatchString(rest) {
 			mine = append(mine, e.Name())
 		}
 	}

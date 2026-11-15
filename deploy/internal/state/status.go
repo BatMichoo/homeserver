@@ -40,9 +40,9 @@ type statusEvent struct {
 	Message string    `json:"message"`
 }
 
-// WriteStatus writes dir/public/status.json from s.
-func WriteStatus(dir string, s *State) error {
-	st := status{Version: 1, LastResult: s.LastResult, Held: []statusHeld{}, Events: []statusEvent{}, UpdatedAt: time.Now().UTC()}
+// WriteStatus writes dir/public/status.json from s, as of now.
+func WriteStatus(dir string, s *State, now time.Time) error {
+	st := status{Version: 1, LastResult: s.LastResult, Held: []statusHeld{}, Events: []statusEvent{}, UpdatedAt: now.UTC()}
 	st.Deployed.Commit, st.Deployed.Subject, st.Deployed.At = s.Deployed.Commit, s.Deployed.Subject, s.Deployed.At
 	if !s.CertExpiry.IsZero() {
 		e := s.CertExpiry
@@ -68,5 +68,5 @@ func WriteStatus(dir string, s *State) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(dir, "public", "status.json"), b)
+	return writeAtomic(filepath.Join(dir, "public", "status.json"), b, 0o644)
 }

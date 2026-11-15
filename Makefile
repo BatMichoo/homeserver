@@ -28,12 +28,17 @@ THEME_VERSION := v0.1.0
 THEME_FILES := css/tokens.css css/theme.css css/mobile.css css/tablet.css js/theme.js
 
 # up starts everything (issuing the certificate first if needed).
+# up and down take the deployer's lock, so they never run in the middle of
+# a deploy (and wait up to 10 minutes for one to finish).
+LOCK := flock -w 600 .deploy/lock
+
 up:
 	@mkdir -p $(CERT_FOLDER) .deploy/public
-	$(COMPOSE) up -d --build
+	$(LOCK) $(COMPOSE) up -d --build
 
 down:
-	$(COMPOSE) down
+	@mkdir -p .deploy
+	$(LOCK) $(COMPOSE) down
 
 # check validates the scripts and configuration without starting anything.
 # nginx -t runs against a throwaway certificate.

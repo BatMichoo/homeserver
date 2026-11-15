@@ -18,7 +18,8 @@ type Mount struct{ Type, Source, Target string }
 type Service struct {
 	Name         string
 	Image        string
-	BuildContext string // relative to the project; "" without build
+	BuildContext string   // relative to the project; "" without build
+	BuildPaths   []string // everything the build reads: context, a dockerfile outside it, extra contexts
 	Restart      string
 	DependsOn    []string
 	Labels       map[string]string
@@ -50,7 +51,9 @@ type rawProject struct {
 type rawService struct {
 	Image string `json:"image"`
 	Build *struct {
-		Context string `json:"context"`
+		Context            string            `json:"context"`
+		Dockerfile         string            `json:"dockerfile"`
+		AdditionalContexts map[string]string `json:"additional_contexts"`
 	} `json:"build"`
 	Restart   string                     `json:"restart"`
 	DependsOn map[string]json.RawMessage `json:"depends_on"`
@@ -95,6 +98,7 @@ func Parse(data []byte, projectDir string) (Project, error) {
 		}
 		if rs.Build != nil {
 			s.BuildContext = strings.TrimSuffix(filepath.ToSlash(rs.Build.Context), "/")
+			s.BuildPaths = buildPaths(s.BuildContext, rs.Build.Dockerfile, rs.Build.AdditionalContexts)
 		}
 		for d := range rs.DependsOn {
 			s.DependsOn = append(s.DependsOn, d)
@@ -106,6 +110,32 @@ func Parse(data []byte, projectDir string) (Project, error) {
 		p.Services[name] = s
 	}
 	return p, nil
+}
+
+// buildPaths lists the project paths a build reads: its context, a
+// dockerfile outside the context, and local extra contexts (not images,
+// services or URLs).
+func buildPaths(context, dockerfile string, extra map[string]string) []string {
+	paths := []string{context}
+	if dockerfile != "" && !filepath.IsAbs(dockerfile) {
+		df := filepath.ToSlash(filepath.Clean(filepath.Join(context, dockerfile)))
+		if df != context && !strings.HasPrefix(df, context+"/") {
+			paths = append(paths, df)
+		}
+	}
+	var names []string
+	for n := range extra {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		v := extra[n]
+		if strings.Contains(v, "://") || strings.HasPrefix(v, "service:") || filepath.IsAbs(v) {
+			continue
+		}
+		paths = append(paths, strings.TrimSuffix(filepath.ToSlash(filepath.Clean(v)), "/"))
+	}
+	return paths
 }
 
 // Order lists the services so each comes after what it depends on (ties

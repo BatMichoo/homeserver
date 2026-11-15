@@ -3,6 +3,7 @@ package ci
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,4 +69,12 @@ func TestCISendsToken(t *testing.T) {
 	defer srv.Close()
 	Client{HTTP: srv.Client(), BaseURL: srv.URL, Token: "tok"}.Status(context.Background(), "me/repo", "abc")
 	assert.Equal(t, "Bearer tok", auth)
+}
+
+func TestCILogsWhy(t *testing.T) {
+	var buf strings.Builder
+	c := serve(t, 403, `{"message":"API rate limit exceeded"}`)
+	c.Log = log.New(&buf, "", 0)
+	c.Status(context.Background(), "me/repo", "abc")
+	assert.Contains(t, buf.String(), "403")
 }

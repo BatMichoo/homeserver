@@ -67,7 +67,7 @@ func runDeployer() int {
 		Cfg:     cfg,
 		Git:     git.Git{R: r, Dir: dir},
 		Compose: c,
-		CI:      ci.Client{Token: cfg.GitHubToken},
+		CI:      ci.Client{Token: cfg.GitHubToken, Log: logger},
 		Backup: func(ctx context.Context, p compose.Project, commit string) error {
 			files, err := backup.Run(ctx, c, p, filepath.Join(dir, "backups"), commit, cfg.BackupKeep, time.Now())
 			for _, f := range files {
@@ -94,6 +94,9 @@ func runDeployer() int {
 		}
 		if err := d.Schedule(ctx); err != nil {
 			logger.Printf("schedule: %v", err)
+		}
+		if err := d.Touch(); err != nil {
+			logger.Printf("status: %v", err)
 		}
 		if cfg.Once {
 			if perr != nil {

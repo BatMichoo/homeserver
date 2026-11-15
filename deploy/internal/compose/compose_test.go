@@ -74,3 +74,12 @@ func TestParseDisabledHealthcheck(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, p.Services["a"].Healthcheck)
 }
+
+func TestParseBuildPaths(t *testing.T) {
+	p, err := Parse([]byte(`{"name":"x","services":{"web":{"build":{
+		"context":"/x/web","dockerfile":"../docker/web.Dockerfile",
+		"additional_contexts":{"shared":"/x/shared","img":"docker-image://alpine","svc":"service:base","remote":"https://example.com/x.git"}},
+		"healthcheck":{"test":["CMD","true"]}}}}`), "/x")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"web", "docker/web.Dockerfile", "shared"}, p.Services["web"].BuildPaths)
+}

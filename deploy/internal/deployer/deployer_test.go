@@ -123,7 +123,7 @@ func TestPollOneServiceChanged(t *testing.T) {
 	w := newWorld(t, stack())
 	w.push("c2", "web change", stack(), "web/main.go")
 	require.NoError(t, w.d.Poll(ctx))
-	assert.Equal(t, []string{"build web", "up web"}, w.compose.calls)
+	assert.Equal(t, []string{"build web", "up web", "prune"}, w.compose.calls)
 	assert.Equal(t, "img-web@c2", w.compose.images["web"])
 	assert.Equal(t, "img-app@c1", w.compose.images["app"])
 	assert.Equal(t, "deployed", w.state().LastResult)
@@ -133,14 +133,14 @@ func TestPollSubmoduleBump(t *testing.T) {
 	w := newWorld(t, stack())
 	w.push("c2", "bump app", stack(), "apps/app")
 	require.NoError(t, w.d.Poll(ctx))
-	assert.Equal(t, []string{"build app", "up app"}, w.compose.calls)
+	assert.Equal(t, []string{"build app", "up app", "prune"}, w.compose.calls)
 }
 
 func TestPollImagePinPulls(t *testing.T) {
 	w := newWorld(t, stack())
 	w.push("c2", "db", stack(withDef("db", `{"image":"db:2"}`)))
 	require.NoError(t, w.d.Poll(ctx))
-	assert.Equal(t, []string{"pull db", "up db"}, w.compose.calls)
+	assert.Equal(t, []string{"pull db", "up db", "prune"}, w.compose.calls)
 }
 
 func TestPollUnhealthyServiceHeld(t *testing.T) {
@@ -235,7 +235,7 @@ func TestPollNewServiceDeployed(t *testing.T) {
 	w := newWorld(t, stack())
 	w.push("c2", "media", stack(with(svc("media"))))
 	require.NoError(t, w.d.Poll(ctx))
-	assert.Equal(t, []string{"pull media", "up media"}, w.compose.calls)
+	assert.Equal(t, []string{"pull media", "up media", "prune"}, w.compose.calls)
 }
 
 func TestPollRemovedService(t *testing.T) {
@@ -265,7 +265,7 @@ func TestPollSharedSuccess(t *testing.T) {
 	cfg.Volumes = json.RawMessage(`{"new":{}}`)
 	w.push("c2", "volume", cfg)
 	require.NoError(t, w.d.Poll(ctx))
-	assert.Equal(t, []string{"prepare-all", "up-all"}, w.compose.calls)
+	assert.Equal(t, []string{"prepare-all", "up-all", "prune"}, w.compose.calls)
 	assert.Equal(t, "deployed", w.state().LastResult)
 }
 
@@ -273,7 +273,8 @@ func TestPollOneShotRunsAndFailureIsShared(t *testing.T) {
 	w := newWorld(t, stack())
 	w.push("c2", "certs", stack(), "certs/issue.sh")
 	require.NoError(t, w.d.Poll(ctx))
-	assert.Equal(t, []string{"run certs"}, w.compose.calls)
+	assert.Equal(t, []string{"run certs", "exec nginx sh -c nginx -s reload"}, w.compose.calls,
+		"what depends on the one-shot is reloaded")
 
 	w.push("c3", "certs again", stack(), "certs/issue.sh")
 	w.compose.oneShotFails["certs"] = true

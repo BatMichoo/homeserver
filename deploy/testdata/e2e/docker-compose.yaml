@@ -9,6 +9,13 @@ services:
     build:
       context: ./alpha
     restart: unless-stopped
+    # Its config folder can change without a rebuild: checked, then
+    # "reloaded" in place.
+    volumes:
+      - ./alpha-conf:/conf:ro
+    labels:
+      homeserver.check: "test -f /conf/ok"
+      homeserver.reload: "true"
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/ok"]
       interval: 1s

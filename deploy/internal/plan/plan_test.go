@@ -195,3 +195,19 @@ func TestPlanSharedNoHealthcheck(t *testing.T) {
 	assert.True(t, Make(base(), nw, nil).Shared, "new service without healthcheck")
 	assert.False(t, Make(base(), base(), []string{"README.md"}).Shared, "unchanged services aren't checked")
 }
+
+func TestPlanWholeRepoContext(t *testing.T) {
+	old := project(svc("all", build("."), raw(`{"build":{"context":"."}}`)))
+	assert.Equal(t, []string{"all"}, names(Make(old, old, []string{"README.md"})))
+	assert.True(t, Make(old, old, nil).Empty())
+}
+
+func TestPlanDockerfileAndExtraContexts(t *testing.T) {
+	old := project(svc("web", func(s *compose.Service) {
+		s.BuildContext = "web"
+		s.BuildPaths = []string{"web", "docker/web.Dockerfile", "shared"}
+	}, raw(`{"build":{"context":"web"}}`)))
+	assert.Equal(t, []string{"web"}, names(Make(old, old, []string{"docker/web.Dockerfile"})))
+	assert.Equal(t, []string{"web"}, names(Make(old, old, []string{"shared/lib.go"})))
+	assert.True(t, Make(old, old, []string{"docker/other"}).Empty())
+}

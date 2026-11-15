@@ -124,3 +124,23 @@ func TestBackupUnknownKind(t *testing.T) {
 	_, err := Run(context.Background(), &fakeExec{running: true}, project("mysql"), t.TempDir(), "abc1234", 14, t0)
 	assert.ErrorContains(t, err, "mysql")
 }
+
+// Pruning one database's dumps never touches another whose name starts
+// the same way.
+func TestBackupPruneExactDatabase(t *testing.T) {
+	dir := t.TempDir()
+	x := &fakeExec{running: true, dumps: map[string]string{"app": "A" + complete, "app-old": "O" + complete}}
+	for i := 0; i < 3; i++ {
+		_, err := Run(context.Background(), x, project("postgres"), dir, "abc1234", 1, t0.Add(time.Duration(i)*time.Hour))
+		require.NoError(t, err)
+	}
+	entries, _ := os.ReadDir(dir)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	assert.Equal(t, []string{
+		"db-app-20261115-120000-abc1234.sql.gz",
+		"db-app-old-20261115-120000-abc1234.sql.gz",
+	}, names)
+}

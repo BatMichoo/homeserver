@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 )
@@ -21,8 +22,15 @@ const (
 // Client asks GitHub's check-runs API.
 type Client struct {
 	HTTP    *http.Client
-	BaseURL string // default https://api.github.com
-	Token   string // optional, for rate limits
+	BaseURL string      // default https://api.github.com
+	Token   string      // optional, for rate limits
+	Log     *log.Logger // optional: why a status couldn't be read
+}
+
+func (c Client) logf(format string, args ...any) {
+	if c.Log != nil {
+		c.Log.Printf(format, args...)
+	}
 }
 
 type checkRun struct {
@@ -59,16 +67,19 @@ func (c Client) Status(ctx context.Context, repo, sha string) Status {
 	}
 	res, err := hc.Do(req)
 	if err != nil {
+		c.logf("CI status of %s: %v", sha, err)
 		return Pending
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
+		c.logf("CI status of %s: GitHub answered %s", sha, res.Status)
 		return Pending
 	}
 	var body struct {
 		CheckRuns []checkRun `json:"check_runs"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		c.logf("CI status of %s: %v", sha, err)
 		return Pending
 	}
 
