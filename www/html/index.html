@@ -322,8 +322,8 @@
               <h2 class="tile-name" id="server-title">Server</h2>
               <p class="note" id="server-summary">No deploys yet.</p>
               <div class="rows" id="server-rows" hidden>
-                <div class="row"><span>Last deploy</span><span id="row-deploy"></span></div>
-                <div class="row"><span>Running</span><span id="row-running"></span></div>
+                <div class="row" id="row-deploy-line"><span>Last deploy</span><span id="row-deploy"></span></div>
+                <div class="row" id="row-running-line"><span>Running</span><span id="row-running"></span></div>
                 <div class="row" id="row-apps-line" hidden><span>Apps</span><span id="row-apps"></span></div>
                 <div class="row" id="row-cert-line" hidden><span>Certificate</span><span id="row-cert"></span></div>
               </div>
@@ -466,14 +466,21 @@
         const d = status.deployed || {};
         const events = status.events || [];
         const last = events[events.length - 1];
-        const good = status.last_result === "deployed" || status.last_result === "partial";
-        document.getElementById("row-deploy").textContent = d.at ? ago(d.at) : "never";
-        document.getElementById("row-running").textContent = d.commit
-          ? "“" + d.subject + "” (" + d.commit.slice(0, 7) + ")"
-          : "—";
+        // Before the first deploy the deployer writes no commit, a zero time
+        // and an empty result.
+        const deployed = Boolean(d.commit);
+        const good = ["deployed", "partial", ""].includes(status.last_result || "");
+        if (deployed) {
+          document.getElementById("row-deploy").textContent = ago(d.at);
+          document.getElementById("row-running").textContent =
+            "“" + d.subject + "” (" + d.commit.slice(0, 7) + ")";
+        }
+        document.getElementById("row-deploy-line").hidden = !deployed;
+        document.getElementById("row-running-line").hidden = !deployed;
         rows.hidden = false;
         if (good || !last || last.kind !== status.last_result) {
-          summary.hidden = true;
+          summary.textContent = "No deploys yet.";
+          summary.hidden = deployed;
         } else {
           // Something went wrong with a newer commit: say which, and when.
           summary.textContent =
@@ -482,9 +489,9 @@
             ", " + ago(last.time) + ": " + last.message;
           summary.hidden = false;
         }
-        if (good && d.at) {
+        if (good && deployed) {
           mark(chipDeploy, "ok", "Deployed " + ago(d.at));
-        } else if (status.last_result) {
+        } else if (!good) {
           mark(chipDeploy, "warn", results[status.last_result] || status.last_result);
         } else {
           chipDeploy.hidden = true;

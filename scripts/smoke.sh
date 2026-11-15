@@ -254,6 +254,10 @@ body=$(whoc -b "$jar" -H 'X-User-Id: forged' -H 'X-User-Name: forged' "$who/")
 id=${body%%|*}
 echo "$id" | grep -Eq '^[0-9a-f-]{36}$' || fail "auth: whoami got no user id ($body)"
 [ "$body" = "$id|smoke-user" ] || fail "auth: whoami got '$body'"
+# The dashboard's health checks pass no cookies on (the session token stays
+# with nginx and auth).
+body=$(whoc -H "Cookie: homeserver_session=secret; other=1" "$who/status-check")
+[ -z "$body" ] || fail "nginx: the health-check proxy passes cookies on ('$body')"
 
 post -d display_name=Иван -d email= "$auth_url/account" >/dev/null
 [ "$(whoc -b "$jar" "$who/")" = "$id|%D0%98%D0%B2%D0%B0%D0%BD" ] || fail "auth: display name not passed encoded"
