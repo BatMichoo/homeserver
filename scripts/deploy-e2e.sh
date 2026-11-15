@@ -27,6 +27,9 @@ cleanup() {
 	if [ -d "$server" ]; then
 		compose down -v --rmi local --remove-orphans >/dev/null 2>&1 || true
 	fi
+	# Round 3's network: rolled back, so compose's final config no longer
+	# names it and down leaves it behind.
+	docker network rm homeserver-deploy-e2e_extra >/dev/null 2>&1 || true
 	rm -rf "$tmp"
 }
 trap cleanup EXIT
