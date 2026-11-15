@@ -11,53 +11,192 @@
     <style>
       /* Dashboard-only layout, built on the theme's tokens. */
       .dashboard {
-        max-width: 40rem;
-        margin: 2rem auto;
+        width: 100%;
+        max-width: 64rem;
+        margin: 1.5rem auto 2.5rem;
+        padding: 0 1rem;
         display: flex;
         flex-direction: column;
-        gap: 1.25rem;
+        gap: 1.75rem;
         text-align: left;
       }
-      .clock {
+
+      /* hidden wins over the display rules below. */
+      .dashboard [hidden] {
+        display: none !important;
+      }
+
+      /* Clock, greeting and status chips. */
+      .hero {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.9rem;
         text-align: center;
-        color: var(--text);
+      }
+      .greeting {
+        color: var(--accent);
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      body.dark .greeting {
+        color: oklch(0.8 0.12 var(--hue));
       }
       .clock-time {
-        font-size: 3.5rem;
-        font-weight: 700;
-        line-height: 1.1;
+        color: var(--text);
+        font-size: 4rem;
+        font-weight: 800;
+        line-height: 1;
+        letter-spacing: -0.02em;
         font-variant-numeric: tabular-nums;
       }
       .clock-date {
         color: var(--text-muted);
       }
-      /* The theme's .card is a tall centred tile; here it's a panel. */
-      .dashboard .card {
-        display: block;
-        min-height: 0;
-        padding: 1.25rem 1.5rem;
-        border-radius: var(--radius);
-        background-color: var(--bg-light);
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.5rem;
+      }
+      .status-chip {
+        padding: 0.35rem 0.85rem;
+        border-radius: 999px;
+        background: var(--bg-light);
         box-shadow: var(--shadow);
-      }
-      .dashboard h2 {
-        margin-bottom: 0.5rem;
-        font-size: 1.1rem;
         color: var(--text);
+        font-size: 0.85rem;
+        font-weight: 600;
       }
-      .dashboard a {
+      .dot {
+        display: inline-block;
+        flex: none;
+        width: 0.55rem;
+        height: 0.55rem;
+        margin-right: 0.4rem;
+        border-radius: 50%;
+        background: var(--text-muted);
+        opacity: 0.5;
+        vertical-align: 0.05em;
+      }
+      .ok .dot { background: var(--success); opacity: 1; }
+      .warn .dot { background: var(--warning); opacity: 1; }
+      .bad .dot { background: var(--danger); opacity: 1; }
+
+      /* Cards: one per app, and the server. */
+      .tiles {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+        gap: 1rem;
+      }
+      .tile {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+        padding: 1.25rem;
+        border: 1px solid transparent;
+        border-radius: var(--radius);
+        background: var(--bg-light);
+        box-shadow: var(--shadow);
+        color: var(--text);
+        text-decoration: none;
+        transition: transform 0.15s, border-color 0.15s;
+      }
+      a.tile:hover,
+      a.tile:focus-visible {
+        transform: translateY(-3px);
+        border-color: var(--highlight-sec);
+        outline: none;
+      }
+      .tile-icon {
+        display: grid;
+        place-items: center;
+        width: 3rem;
+        height: 3rem;
+        border-radius: 0.75rem;
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+      body.dark .tile-icon {
+        color: oklch(0.8 0.12 var(--hue));
+      }
+      .tile-name {
+        font-size: 1.15rem;
+        font-weight: 800;
+      }
+      .tile-desc {
+        color: var(--text-muted);
+        font-size: 0.9rem;
+      }
+      .badge {
+        position: absolute;
+        top: 1rem;
+        right: 1rem;
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        font-weight: 700;
+      }
+      .rows {
+        display: flex;
+        flex-direction: column;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.3rem 0;
+        border-top: 1px solid var(--bg);
+        font-size: 0.85rem;
+      }
+      .row:first-child {
+        border-top: 0;
+      }
+      .row > span:last-child {
+        color: var(--text);
+        font-weight: 600;
+        text-align: right;
+        overflow-wrap: anywhere;
+      }
+      .note {
+        color: var(--text-muted);
+        font-size: 0.85rem;
+      }
+      .held {
+        margin-left: 1.1rem;
+        color: var(--danger);
+        font-size: 0.85rem;
+      }
+      .dashboard a.link {
+        color: var(--text-sec);
+        font-size: 0.85rem;
+        font-weight: 600;
+      }
+
+      /* Setting up a device. */
+      .device {
+        padding: 1.1rem 1.25rem;
+        border-radius: var(--radius);
+        background: var(--bg);
+        color: var(--text-muted);
+        font-size: 0.9rem;
+      }
+      .device h2 {
+        margin-bottom: 0.4rem;
+        color: var(--text);
+        font-size: 1rem;
+      }
+      .device a {
         color: var(--text-sec);
         font-weight: 600;
       }
-      .empty {
-        color: var(--text-muted);
-      }
-      .services {
-        margin-left: 1.2rem;
-      }
-      .held {
-        margin: 0.5rem 0 0.5rem 1.2rem;
-        color: var(--danger);
+
+      @media (max-width: 40rem) {
+        .clock-time {
+          font-size: 3rem;
+        }
       }
     </style>
     <title>Home server</title>
@@ -83,6 +222,18 @@
         }
       })();
     </script>
+
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-film" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="2" width="20" height="20" rx="2.5" /><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5" />
+      </symbol>
+      <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="8" r="5" /><path d="M20 21a8 8 0 0 0-16 0" />
+      </symbol>
+      <symbol id="i-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><path d="M6 6h.01M6 18h.01" />
+      </symbol>
+    </svg>
 
     <header class="header-section" id="header">
       <div class="header-left">
@@ -136,26 +287,53 @@
     <div class="container">
       <main id="content">
         <div class="dashboard">
-          <div class="clock">
-            <div id="clock" class="clock-time">00:00</div>
-            <div id="date" class="clock-date">&nbsp;</div>
+          <section class="hero" aria-label="Clock and status">
+            <div>
+              <div id="greeting" class="greeting">&nbsp;</div>
+              <div id="clock" class="clock-time">00:00</div>
+              <div id="date" class="clock-date">&nbsp;</div>
+            </div>
+            <!-- Filled by the script below; hidden without it. -->
+            <div class="chips">
+              <span class="status-chip" id="chip-apps" hidden></span>
+              <span class="status-chip" id="chip-deploy" hidden></span>
+              <span class="status-chip" id="chip-cert" hidden></span>
+            </div>
+          </section>
+
+          <div class="tiles">
+            <a class="tile app-card" data-app="media" data-name="Media" href="/go/media">
+              <span class="badge" hidden></span>
+              <span class="tile-icon"><svg width="24" height="24" aria-hidden="true"><use href="#i-film" /></svg></span>
+              <span class="tile-name">Media</span>
+              <span class="tile-desc">Films and series, and downloads</span>
+            </a>
+
+            <a class="tile app-card" data-app="auth" data-name="Account" href="/go/auth">
+              <span class="badge" hidden></span>
+              <span class="tile-icon"><svg width="24" height="24" aria-hidden="true"><use href="#i-user" /></svg></span>
+              <span class="tile-name">Account</span>
+              <span class="tile-desc">Your login, name and password</span>
+            </a>
+
+            <section class="tile" id="server-status" aria-labelledby="server-title">
+              <span class="badge" id="server-badge" hidden></span>
+              <span class="tile-icon"><svg width="24" height="24" aria-hidden="true"><use href="#i-server" /></svg></span>
+              <h2 class="tile-name" id="server-title">Server</h2>
+              <p class="note" id="server-summary">No deploys yet.</p>
+              <div class="rows" id="server-rows" hidden>
+                <div class="row"><span>Last deploy</span><span id="row-deploy"></span></div>
+                <div class="row"><span>Running</span><span id="row-running"></span></div>
+                <div class="row" id="row-apps-line" hidden><span>Apps</span><span id="row-apps"></span></div>
+                <div class="row" id="row-cert-line" hidden><span>Certificate</span><span id="row-cert"></span></div>
+              </div>
+              <ul class="held" id="server-held" hidden></ul>
+              <p class="note" id="server-stale" hidden></p>
+              <a class="link" href="#device">Set up a device</a>
+            </section>
           </div>
 
-          <section class="card" id="server-status">
-            <h2>Server</h2>
-            <p class="empty" id="server-summary">No deploys yet.</p>
-            <ul class="held" id="server-held" hidden></ul>
-            <p class="empty" id="server-cert" hidden></p>
-          </section>
-
-          <section class="card">
-            <h2>Services</h2>
-            <ul class="services">
-              <li><a href="/go/media">Media</a>: films and series, and downloads</li>
-            </ul>
-          </section>
-
-          <section class="card">
+          <section class="device" id="device">
             <h2>Set up a device</h2>
             <p>
               To open the home server's sites without warnings, a phone or laptop
@@ -185,13 +363,61 @@
           month: "long",
           day: "numeric",
         });
+        const hour = now.getHours();
+        document.getElementById("greeting").textContent =
+          hour < 5 ? "Good night" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
       }
       updateClock();
       setInterval(updateClock, 1000);
       document.getElementById("year").textContent = new Date().getFullYear();
       document.getElementById("address").textContent = location.host;
 
-      // Server panel: the deployer's status (deploy/), refreshed every minute.
+      // A chip or badge: text after a coloured dot (ok, warn, bad, or none).
+      function mark(el, level, text) {
+        el.className = el.className.replace(/\s*\b(ok|warn|bad)\b/g, "") + (level ? " " + level : "");
+        const dot = document.createElement("span");
+        dot.className = "dot";
+        el.replaceChildren(dot, text);
+        el.hidden = false;
+      }
+
+      // --- Apps: each card's /status/<app> (nginx asks the app's /healthz).
+      let appsDown = null; // names of the apps that are down; null until checked
+      async function updateApps() {
+        const cards = [...document.querySelectorAll(".app-card")];
+        const down = [];
+        await Promise.all(
+          cards.map(async (card) => {
+            const badge = card.querySelector(".badge");
+            if (badge.hidden) mark(badge, "", "Checking…");
+            let up = false;
+            try {
+              const response = await fetch("/status/" + card.dataset.app, {
+                cache: "no-store",
+                signal: AbortSignal.timeout(5000),
+              });
+              up = response.ok;
+            } catch {}
+            mark(badge, up ? "ok" : "bad", up ? "Running" : "Down");
+            if (!up) down.push(card.dataset.name);
+          }),
+        );
+        appsDown = down;
+        mark(
+          document.getElementById("chip-apps"),
+          down.length ? "bad" : "ok",
+          down.length === 0
+            ? "All apps running"
+            : down.length === 1
+              ? down[0] + " is down"
+              : down.length + " apps down",
+        );
+        document.getElementById("row-apps").textContent = cards.length - down.length + " of " + cards.length + " up";
+        document.getElementById("row-apps-line").hidden = false;
+        updateServerBadge();
+      }
+
+      // --- Server: the deployer's status (deploy/), when it runs.
       const results = {
         deployed: "Deployed",
         partial: "Deployed, with services held back",
@@ -212,10 +438,14 @@
         return Math.round(hours / 24) + " days ago";
       }
 
+      let serverProblem = false; // a failed deploy, held services or a stale deployer
       async function updateServer() {
         const summary = document.getElementById("server-summary");
+        const rows = document.getElementById("server-rows");
         const held = document.getElementById("server-held");
-        const cert = document.getElementById("server-cert");
+        const stale = document.getElementById("server-stale");
+        const chipDeploy = document.getElementById("chip-deploy");
+        const chipCert = document.getElementById("chip-cert");
         let status;
         try {
           const response = await fetch("/deploy/status.json", { cache: "no-store" });
@@ -224,33 +454,41 @@
           if (status.version !== 1) throw new Error("unknown status version");
         } catch {
           summary.textContent = "No deploys yet.";
-          held.hidden = true;
-          cert.hidden = true;
+          summary.hidden = false;
+          rows.hidden = held.hidden = stale.hidden = true;
+          chipDeploy.hidden = chipCert.hidden = true;
+          document.getElementById("row-cert-line").hidden = true;
+          serverProblem = false;
+          updateServerBadge();
           return;
         }
+
         const d = status.deployed || {};
-        const running = d.commit
-          ? "“" + d.subject + "” (" + d.commit.slice(0, 7) + ", deployed " + ago(d.at) + ")"
-          : "";
-        const last = (status.events || [])[(status.events || []).length - 1];
-        let text;
-        if (status.last_result === "deployed" || status.last_result === "partial") {
-          text = (results[status.last_result] || "") + ": " + running;
-        } else if (last && last.kind === status.last_result) {
-          // Something went wrong with a newer commit: say which, and what still runs.
-          text =
+        const events = status.events || [];
+        const last = events[events.length - 1];
+        const good = status.last_result === "deployed" || status.last_result === "partial";
+        document.getElementById("row-deploy").textContent = d.at ? ago(d.at) : "never";
+        document.getElementById("row-running").textContent = d.commit
+          ? "“" + d.subject + "” (" + d.commit.slice(0, 7) + ")"
+          : "—";
+        rows.hidden = false;
+        if (good || !last || last.kind !== status.last_result) {
+          summary.hidden = true;
+        } else {
+          // Something went wrong with a newer commit: say which, and when.
+          summary.textContent =
             (results[status.last_result] || status.last_result) +
             (last.commit ? " " + last.commit.slice(0, 7) : "") +
-            ", " + ago(last.time) + ": " + last.message +
-            (running ? ". Running: " + running : "");
+            ", " + ago(last.time) + ": " + last.message;
+          summary.hidden = false;
+        }
+        if (good && d.at) {
+          mark(chipDeploy, "ok", "Deployed " + ago(d.at));
+        } else if (status.last_result) {
+          mark(chipDeploy, "warn", results[status.last_result] || status.last_result);
         } else {
-          text = running ? "Running: " + running : "No deploys yet.";
+          chipDeploy.hidden = true;
         }
-        // The deployer refreshes the file every poll (30 minutes by default).
-        if (status.updated_at && Date.now() - new Date(status.updated_at).getTime() > 2 * 3600 * 1000) {
-          text += " The deployer hasn't reported since " + ago(status.updated_at) + "; is it running?";
-        }
-        summary.textContent = text;
 
         held.replaceChildren();
         for (const h of status.held || []) {
@@ -260,15 +498,41 @@
         }
         held.hidden = held.children.length === 0;
 
+        // The deployer refreshes the file every poll (30 minutes by default).
+        const isStale =
+          status.updated_at && Date.now() - new Date(status.updated_at).getTime() > 2 * 3600 * 1000;
+        stale.textContent = isStale
+          ? "The deployer hasn't reported since " + ago(status.updated_at) + "; is it running?"
+          : "";
+        stale.hidden = !isStale;
+
         if (status.cert_expiry) {
-          cert.textContent =
-            "Certificate valid until " + new Date(status.cert_expiry).toLocaleDateString() + ".";
-          cert.hidden = false;
+          const expiry = new Date(status.cert_expiry);
+          const days = (expiry.getTime() - Date.now()) / 86400000;
+          const date = expiry.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+          document.getElementById("row-cert").textContent = "until " + date;
+          document.getElementById("row-cert-line").hidden = false;
+          if (days < 0) mark(chipCert, "bad", "Certificate expired");
+          else if (days < 30) mark(chipCert, "warn", "Certificate expires " + date);
+          else mark(chipCert, "ok", "Certificate OK");
         } else {
-          cert.hidden = true;
+          document.getElementById("row-cert-line").hidden = true;
+          chipCert.hidden = true;
         }
+
+        serverProblem = !good || !held.hidden || isStale;
+        updateServerBadge();
       }
+
+      function updateServerBadge() {
+        const badge = document.getElementById("server-badge");
+        const problem = serverProblem || (appsDown !== null && appsDown.length > 0);
+        mark(badge, problem ? "warn" : "ok", problem ? "Needs a look" : "Healthy");
+      }
+
+      updateApps();
       updateServer();
+      setInterval(updateApps, 60000);
       setInterval(updateServer, 60000);
     </script>
   </body>

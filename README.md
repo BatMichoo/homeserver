@@ -257,10 +257,13 @@ The only parts open without login are the snooze links in reminder emails
 
 ## Dashboard
 
-`www/html/index.html` is the page at `https://<LAN_IP>/`: clock, the
-server's status (last deploy, services held back, certificate expiry, from
-the deployer's `/deploy/status.json`), services (links to the apps) and how to
-trust the CA. It uses the shared theme
+`www/html/index.html` is the page at `https://<LAN_IP>/`: a clock with
+status chips, a card per app (with a Running/Down badge) and a Server card
+(last deploy, services held back, certificate expiry, from the deployer's
+`/deploy/status.json`), then how to trust the CA. The badges come from
+`/status/<app>`, which nginx answers by asking the app's `/healthz`
+(`nginx/sites/default.conf`); a new app gets a card, a `/go/<app>` redirect
+and a `/status/<app>` route there. It uses the shared theme
 ([BatMichoo/theme](https://github.com/BatMichoo/theme)), whose files are
 copied into `www/html/theme/`. To move to a newer theme, change
 `THEME_VERSION` in the Makefile and run `make theme`.

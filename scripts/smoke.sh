@@ -208,6 +208,12 @@ for h in "Cache-Control: no-cache" "X-Frame-Options: DENY" "X-Content-Type-Optio
 	echo "$headers" | grep -qx "$h" || fail "nginx: deploy status lacks '$h'"
 done
 https "https://homeserver.lan:$HTTPS_PORT/" | grep -q 'id="server-status"' || fail "nginx: dashboard has no server status panel"
+page=$(https "https://homeserver.lan:$HTTPS_PORT/")
+for app in media auth; do
+	echo "$page" | grep -q "data-app=\"$app\"" || fail "nginx: dashboard has no $app card"
+	echo "$page" | grep -q "href=\"/go/$app\"" || fail "nginx: dashboard doesn't link /go/$app"
+done
+echo "$page" | grep -q 'id="device"' || fail "nginx: dashboard has no device section"
 echo "nginx: ok"
 
 # --- auth -------------------------------------------------------------------
