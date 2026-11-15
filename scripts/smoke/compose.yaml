@@ -5,3 +5,10 @@ services:
   nginx:
     volumes:
       - ${SMOKE_SITES:?}:/etc/nginx/sites:ro
+  # No GPU here: Jellyfin converts on the CPU.
+  jellyfin:
+    devices: !reset []
+    group_add: !reset []
+  media:
+    environment:
+      JELLYFIN_HWACCEL: none

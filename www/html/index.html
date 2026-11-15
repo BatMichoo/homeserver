@@ -52,6 +52,9 @@
       .empty {
         color: var(--text-muted);
       }
+      .services {
+        margin-left: 1.2rem;
+      }
       .held {
         margin: 0.5rem 0 0.5rem 1.2rem;
         color: var(--danger);
@@ -147,7 +150,9 @@
 
           <section class="card">
             <h2>Services</h2>
-            <p class="empty">No services yet. Apps show up here as they're added.</p>
+            <ul class="services">
+              <li><a id="media-link" href="/">Media</a>: films and series, and downloads</li>
+            </ul>
           </section>
 
           <section class="card">
@@ -185,6 +190,9 @@
       setInterval(updateClock, 1000);
       document.getElementById("year").textContent = new Date().getFullYear();
       document.getElementById("address").textContent = location.host;
+      // Apps live on subdomains of this one (same port).
+      document.getElementById("media-link").href =
+        location.protocol + "//media." + location.hostname + (location.port ? ":" + location.port : "") + "/";
 
       // Server panel: the deployer's status (deploy/), refreshed every minute.
       const results = {

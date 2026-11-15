@@ -88,6 +88,7 @@ services:
       PGUSER: postgres
       PGPASSWORD: ${POSTGRES_PASSWORD:-}
       AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:-}
+      MEDIA_DB_PASSWORD: ${MEDIA_DB_PASSWORD:-}
     volumes:
       - ./db:/db:ro
     depends_on:
@@ -116,6 +117,88 @@ services:
     depends_on:
       db-setup:
         condition: service_completed_successfully
+    restart: unless-stopped
+
+  # The media app (media/, a submodule): media.<LAN_DOMAIN>. Browses and
+  # plays the library, files finished downloads into it, and is the only
+  # way to Jellyfin and Transmission.
+  media:
+    build:
+      context: ./media
+    # The host user, so the files it links in the media folder are yours.
+    user: "${MEDIA_UID:-1000}:${MEDIA_GID:-1000}"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    environment:
+      DB_HOST: db
+      DB_NAME: media
+      DB_USER: media
+      DB_PASS: ${MEDIA_DB_PASSWORD:-}
+      LAN_DOMAIN: ${LAN_DOMAIN:-}
+      HTTPS_PORT: ${HTTPS_PORT:-443}
+      JELLYFIN_USER: ${JELLYFIN_USER:-}
+      JELLYFIN_PASSWORD: ${JELLYFIN_PASSWORD:-}
+      JELLYFIN_HWACCEL: ${JELLYFIN_HWACCEL:-vaapi}
+      TRANSMISSION_USER: ${TRANSMISSION_USER:-}
+      TRANSMISSION_PASSWORD: ${TRANSMISSION_PASSWORD:-}
+    volumes:
+      - ${MEDIA_DIR:-./media-data}:/data
+    depends_on:
+      db-setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Jellyfin, pinned: the library, metadata and video conversion (on the
+  # Intel GPU). Hidden: no port, no site; the media app sets it up and is
+  # the only thing that talks to it.
+  jellyfin:
+    image: jellyfin/jellyfin:12.4.20261026-211555@sha256:fea863d0cd9ec445985d9c75fc6ed64e38a1d2766cf0c250a33d553f4fc1b771
+    user: "${MEDIA_UID:-1000}:${MEDIA_GID:-1000}"
+    group_add:
+      # Owner group of /dev/dri/renderD128 on the host (see .env.template).
+      - "${RENDER_GID:-109}"
+    devices:
+      - /dev/dri:/dev/dri
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8096/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    volumes:
+      - jellyfin-config:/config
+      # Conversion scratch: pieces of video while someone watches.
+      - jellyfin-cache:/cache
+      - ${MEDIA_DIR:-./media-data}/library:/data/library:ro
+    restart: unless-stopped
+
+  # Transmission, pinned: downloads into the media folder. Its web
+  # interface is hidden; only the media app uses it. The peer port is open
+  # on the host so it can seed.
+  transmission:
+    image: lscr.io/linuxserver/transmission:4.1.4-r0-ls369@sha256:aaf349cd859ca9d5f34f394c56b8097c267a513283698adc4d07ee61d7cb1a85
+    environment:
+      PUID: ${MEDIA_UID:-1000}
+      PGID: ${MEDIA_GID:-1000}
+      USER: ${TRANSMISSION_USER:-}
+      PASS: ${TRANSMISSION_PASSWORD:-}
+      PEERPORT: ${TRANSMISSION_PEER_PORT:-51413}
+    ports:
+      - "${TRANSMISSION_PEER_PORT:-51413}:${TRANSMISSION_PEER_PORT:-51413}/tcp"
+      - "${TRANSMISSION_PEER_PORT:-51413}:${TRANSMISSION_PEER_PORT:-51413}/udp"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:9091/transmission/rpc"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    volumes:
+      - transmission-config:/config
+      - ${MEDIA_DIR:-./media-data}:/data
     restart: unless-stopped
 
   # Opt-in: start with `make autodeploy`. Deploys main once CI passes, per
@@ -149,3 +232,8 @@ volumes:
   # The home CA: back it up (make ca-backup). Losing it means every device
   # has to trust a new CA.
   ca-data:
+  # Jellyfin's settings and metadata (rebuilt by a rescan if lost), its
+  # conversion scratch, and Transmission's settings.
+  jellyfin-config:
+  jellyfin-cache:
+  transmission-config:

@@ -32,8 +32,13 @@ THEME_FILES := css/tokens.css css/theme.css css/mobile.css css/tablet.css js/the
 # a deploy (and wait up to 10 minutes for one to finish).
 LOCK := flock -w 600 .deploy/lock
 
+# The media folder (MEDIA_DIR in .env, else ./media-data). Its folders are
+# made here, so they belong to you rather than to Docker's root.
+MEDIA_FOLDER = $$(v=$$(sed -n 's/^MEDIA_DIR=//p' .env 2>/dev/null | tail -1); echo "$${v:-./media-data}")
+
 up:
 	@mkdir -p $(CERT_FOLDER) .deploy/public
+	@d=$(MEDIA_FOLDER); mkdir -p "$$d/downloads" "$$d/library/Movies" "$$d/library/Shows"
 	$(LOCK) $(COMPOSE) up -d --build
 
 down:

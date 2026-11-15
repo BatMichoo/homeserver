@@ -8,6 +8,8 @@ cd "$(dirname "$0")/.."
 # Settings exported in the caller's shell would override the env file below.
 unset COUNTRY_ISO PROVINCE CITY ORG_NAME LAN_DOMAIN LAN_IP CERTS_UID CERTS_GID \
 	POSTGRES_PASSWORD AUTH_DB_PASSWORD SESSION_TTL \
+	MEDIA_DIR MEDIA_UID MEDIA_GID RENDER_GID MEDIA_DB_PASSWORD JELLYFIN_USER JELLYFIN_PASSWORD \
+	JELLYFIN_HWACCEL TRANSMISSION_USER TRANSMISSION_PASSWORD TRANSMISSION_PEER_PORT \
 	COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES
 
 project=homeserver-smoke
@@ -33,7 +35,17 @@ CERTS_UID=$(id -u)
 CERTS_GID=$(id -g)
 POSTGRES_PASSWORD=smoke-root
 AUTH_DB_PASSWORD=smoke-auth
+MEDIA_DIR=$tmp/media
+MEDIA_UID=$(id -u)
+MEDIA_GID=$(id -g)
+MEDIA_DB_PASSWORD=smoke-media
+JELLYFIN_USER=media
+JELLYFIN_PASSWORD=smoke-jellyfin
+TRANSMISSION_USER=media
+TRANSMISSION_PASSWORD=smoke-transmission
+TRANSMISSION_PEER_PORT=51499
 ENV
+mkdir -p "$tmp/media/downloads" "$tmp/media/library/Movies" "$tmp/media/library/Shows"
 
 # The smoke override adds a test-only site (scripts/smoke/whoami.conf).
 export SMOKE_SITES="$tmp/sites"
@@ -46,6 +58,8 @@ mk() { make -s "$@" COMPOSE="docker compose -p $project $files --env-file $tmp/e
 
 cleanup() {
 	compose down -v --remove-orphans >/dev/null 2>&1 || true
+	# Jellyfin and Transmission may leave files owned by other users.
+	docker run --rm -v "$tmp:/t" alpine:3.20 rm -rf /t/media >/dev/null 2>&1 || true
 	rm -rf "$tmp"
 }
 trap cleanup EXIT
@@ -261,3 +275,34 @@ r=$(post -d username=smoke-user -d password=secret1 --data-urlencode next=https:
 r=$(authc -b "$jar" -H "Origin: https://evil.com" -o /dev/null -w '%{http_code}' -X POST "$auth_url/logout")
 [ "$r" = 403 ] || fail "auth: cross-site logout allowed ($r)"
 echo "auth: ok"
+
+# --- media ------------------------------------------------------------------
+# media.<domain> (the media submodule) behind the login; Jellyfin and
+# Transmission only reachable by it. No GPU here: conversion on the CPU
+# (scripts/smoke/compose.yaml).
+compose up -d --build --wait media jellyfin transmission >/dev/null 2>&1 || fail "media: did not start"
+media_url="https://media.homeserver.lan:$HTTPS_PORT"
+mediac() { curl -s --cacert "$ca" --resolve "media.homeserver.lan:$HTTPS_PORT:127.0.0.1" "$@"; }
+[ "$(compose exec -T media wget -qO- http://127.0.0.1:8080/healthz)" = ok ] || fail "media: /healthz"
+r=$(mediac -o /dev/null -w '%{http_code} %{redirect_url}' "$media_url/")
+[ "$r" = "302 $auth_url/login?next=https%3A%2F%2Fmedia.homeserver.lan%3A$HTTPS_PORT%2F" ] ||
+	fail "media: anonymous page load not sent to login ($r)"
+r=$(post -d username=smoke-user -d password=secret1 "$auth_url/login")
+[ "${r%% *}" = 303 ] || fail "media: login ($r)"
+page=$(mediac -b "$jar" "$media_url/")
+echo "$page" | grep -q 'class="header-section"' || fail "media: no theme header"
+echo "$page" | grep -q '<title>Home · Media</title>' || fail "media: not the media app"
+for p in /stream/System/Info /stream/Users/x /healthz; do
+	[ "$(mediac -b "$jar" -o /dev/null -w '%{http_code}' "$media_url$p")" = 404 ] || fail "media: $p reachable"
+done
+for host in jellyfin transmission; do
+	page=$(curl -s --cacert "$ca" --resolve "$host.homeserver.lan:$HTTPS_PORT:127.0.0.1" "https://$host.homeserver.lan:$HTTPS_PORT/")
+	echo "$page" | grep -q '<title>Home server</title>' || fail "media: $host.<domain> isn't the dashboard"
+done
+for svc in jellyfin:8096 transmission:9091; do
+	if docker port "$(compose ps -q "${svc%:*}")" "${svc#*:}/tcp" >/dev/null 2>&1; then
+		fail "media: ${svc%:*}'s port ${svc#*:} is published"
+	fi
+done
+https -s "https://homeserver.lan:$HTTPS_PORT/" | grep -q 'id="media-link"' || fail "media: the dashboard doesn't link to it"
+echo "media: ok"

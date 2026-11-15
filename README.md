@@ -2,8 +2,9 @@
 
 The manager of the home server: the reverse proxy (nginx), the home
 certificate authority (CA) that gives every service a trusted HTTPS
-certificate, the login service, and the deployer. Apps
-(Expenser, media) join later and know nothing about how they're hosted.
+certificate, the login service, and the deployer. Apps are git
+submodules (media now, Expenser later) and know nothing about how they're
+hosted.
 
 Right now it runs:
 
@@ -15,13 +16,17 @@ Right now it runs:
 - **db** and **db-setup**: Postgres for the home server's services.
   `db-setup` creates each service's database and role on every `up`.
 - **auth**: the login service at `https://auth.<LAN_DOMAIN>/`.
+- **media** (submodule `media/`): films and series at
+  `https://media.<LAN_DOMAIN>/`, with **jellyfin** and **transmission**
+  behind it (see Media below).
 - **deployer** (opt-in, `make autodeploy`): deploys `main` after CI
   passes, one service at a time, and runs the certificate check monthly.
 
 ## Setup
 
 ```sh
-cp .env.template .env   # then fill it in
+git submodule update --init   # the apps (media)
+cp .env.template .env         # then fill it in
 make up
 ```
 
@@ -66,6 +71,14 @@ why (usually a missing `LAN_DOMAIN` or `LAN_IP`).
 | `AUTH_DB_PASSWORD` | Password of the auth service's database role | long random string |
 | `SESSION_TTL` | How long a login lasts without use (default `720h`, at least `1h`) | `720h` |
 | `HTTP_PORT`, `HTTPS_PORT` | Ports nginx listens on (default 80 and 443); redirects keep a non-default HTTPS port | `8443` |
+| `MEDIA_DIR` | The media folder on the media drive (default `./media-data`); see Media | `/mnt/media` |
+| `MEDIA_UID`, `MEDIA_GID` | Owner of the files in it (default 1000) | `1000` |
+| `RENDER_GID` | Group of the Intel GPU device, `stat -c %g /dev/dri/renderD128` | `109` |
+| `JELLYFIN_HWACCEL` | `vaapi` (default): convert video on the Intel GPU; `none`: on the CPU | `vaapi` |
+| `MEDIA_DB_PASSWORD` | Password of the media app's database role | long random string |
+| `JELLYFIN_USER`, `JELLYFIN_PASSWORD` | Jellyfin's service account (the media app creates it) | `media`, long random string |
+| `TRANSMISSION_USER`, `TRANSMISSION_PASSWORD` | Transmission's login (only the media app uses it) | `media`, long random string |
+| `TRANSMISSION_PEER_PORT` | Port other peers reach Transmission on, open on the host (default 51413) | `51413` |
 
 ## TLS Certificate
 
@@ -185,11 +198,45 @@ server, and sets the password again on every `up`. Changing the
 password in `.env` is applied the same way. Each app's role can only
 connect to its own database.
 
+## Media
+
+`https://media.<LAN_DOMAIN>/` (the [media](https://github.com/BatMichoo/media)
+submodule) is the only way in: browse films and series, play them in the
+browser with your place saved across devices, and add a magnet link or a
+`.torrent` file (saying whether it's a movie or a series, its title and
+year). Finished downloads are filed into the library with hard links, so
+nothing is stored twice and the torrent keeps seeding, for 72 hours after
+it finishes. The downloads page shows progress and lets you fix a wrong
+title (filed again, not downloaded again) or remove a download, with or
+without its files.
+
+Behind it, neither reachable from the LAN:
+
+- **Jellyfin** (pinned by digest) reads the library, finds posters and
+  descriptions, and converts video a browser can't play, on the Intel GPU
+  (`/dev/dri`). The media app sets it up the first time (its account, the
+  libraries, the GPU); nobody opens Jellyfin itself.
+- **Transmission** (pinned by digest) downloads into the media folder.
+
+The media folder (`MEDIA_DIR`) holds `downloads/` and `library/Movies`,
+`library/Shows`; `make up` creates them. It must be **one filesystem with
+hard links** (ext4, btrfs or xfs; not exFAT, FAT or NTFS, common on
+external drives): otherwise nothing can be filed, and the downloads page
+says so. Back up the drive itself; Jellyfin's own data is only a cache of
+it.
+
+If videos that need converting stutter or won't play, check `RENDER_GID`
+matches `stat -c %g /dev/dri/renderD128`, and as a last resort set
+`JELLYFIN_HWACCEL=none` (CPU only, slow on this laptop).
+
+Watching on a TV (Google TV) isn't set up yet: TV browsers mostly don't
+trust a home CA.
+
 ## Dashboard
 
 `www/html/index.html` is the page at `https://<LAN_IP>/`: clock, the
 server's status (last deploy, services held back, certificate expiry, from
-the deployer's `/deploy/status.json`), services (none yet) and how to
+the deployer's `/deploy/status.json`), services (links to the apps) and how to
 trust the CA. It uses the shared theme
 ([BatMichoo/theme](https://github.com/BatMichoo/theme)), whose files are
 copied into `www/html/theme/`. To move to a newer theme, change
