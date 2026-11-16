@@ -213,6 +213,11 @@ for app in media expenser auth; do
 	echo "$page" | grep -q "href=\"/go/$app\"" || fail "nginx: dashboard doesn't link /go/$app"
 done
 echo "$page" | grep -q 'id="device"' || fail "nginx: dashboard has no device section"
+# Phones and TVs lead with X25519 or P-256: refusing them makes them give up.
+for g in X25519 prime256v1 secp384r1; do
+	[ "$(https --curves "$g" -o /dev/null -w '%{http_code}' "https://homeserver.lan:$HTTPS_PORT/")" = 200 ] ||
+		fail "nginx: TLS key exchange $g refused"
+done
 echo "nginx: ok"
 
 # --- auth -------------------------------------------------------------------
