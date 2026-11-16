@@ -254,6 +254,8 @@ token=$(awk '$6 == "homeserver_session" {print $7}' "$jar")
 [ -n "$token" ] || fail "auth: no session cookie in the jar"
 cookies=$(whoc -H "Cookie: a=1; homeserver_session=$token; homeserver_lang=bg" "$who/cookies")
 [ "$cookies" = "a=1; homeserver_lang=bg" ] || fail "auth: app got cookies '$cookies'"
+cookies=$(whoc -H "Cookie: a=1; homeserver_session=$token; homeserver_lang=bg" "$who/public/cookies")
+[ "$cookies" = "a=1; homeserver_lang=bg" ] || fail "auth: a public location passed cookies '$cookies'"
 
 # nginx finds the auth service again after it's recreated.
 compose up -d --force-recreate --no-deps --wait auth >/dev/null 2>&1 || fail "auth: recreate failed"
