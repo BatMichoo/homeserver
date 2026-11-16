@@ -169,7 +169,7 @@ esac
 https "https://homeserver.lan:$HTTPS_PORT/" | grep -q '</html>' || fail "nginx: dashboard body"
 [ "$(curl -s --cacert "$ca" -o /dev/null -w '%{http_code}' "https://127.0.0.1:$HTTPS_PORT/")" = 200 ] ||
 	fail "nginx: dashboard not served by IP"
-# The dashboard uses the shared theme, served locally, and links no app yet.
+# The dashboard uses the shared theme, served locally.
 page=$(https "https://homeserver.lan:$HTTPS_PORT/")
 for f in css/tokens.css css/theme.css css/mobile.css css/tablet.css js/theme.js; do
 	echo "$page" | grep -q "/theme/$f" || fail "nginx: dashboard doesn't load theme/$f"
@@ -177,7 +177,6 @@ for f in css/tokens.css css/theme.css css/mobile.css css/tablet.css js/theme.js;
 		fail "nginx: theme/$f not served"
 done
 echo "$page" | grep -q 'class="header-section"' || fail "nginx: dashboard has no theme header"
-if echo "$page" | grep -qi expenser; then fail "nginx: dashboard still mentions Expenser"; fi
 if echo "$page" | grep -Eq '(src|href)="https?://'; then fail "nginx: dashboard loads files from another site"; fi
 [ "$(https -o /dev/null -w '%{http_code}' "https://homeserver.lan:$HTTPS_PORT/nope")" = 404 ] ||
 	fail "nginx: unknown path is not 404"
@@ -209,7 +208,7 @@ for h in "Cache-Control: no-cache" "X-Frame-Options: DENY" "X-Content-Type-Optio
 done
 https "https://homeserver.lan:$HTTPS_PORT/" | grep -q 'id="server-status"' || fail "nginx: dashboard has no server status panel"
 page=$(https "https://homeserver.lan:$HTTPS_PORT/")
-for app in media auth; do
+for app in media expenser auth; do
 	echo "$page" | grep -q "data-app=\"$app\"" || fail "nginx: dashboard has no $app card"
 	echo "$page" | grep -q "href=\"/go/$app\"" || fail "nginx: dashboard doesn't link /go/$app"
 done
@@ -366,4 +365,7 @@ css=$(echo "$page" | grep -o '/static/expenser/css/styles.css?v=[0-9a-z]*' | hea
 [ "$(expc -o /dev/null -w '%{http_code}' "$exp_url$css")" = 200 ] || fail "expenser: its CSS needs a login ($css)"
 # Its port isn't published.
 if docker port "$(compose ps -q expenser)" 8080/tcp >/dev/null 2>&1; then fail "expenser: port 8080 is published"; fi
+r=$(https -o /dev/null -w '%{http_code} %{redirect_url}' "https://homeserver.lan:$HTTPS_PORT/go/expenser")
+[ "$r" = "302 $exp_url/" ] || fail "expenser: /go/expenser doesn't lead to it ($r)"
+[ "$(https "https://homeserver.lan:$HTTPS_PORT/status/expenser")" = ok ] || fail "expenser: /status/expenser"
 echo "expenser: ok"
