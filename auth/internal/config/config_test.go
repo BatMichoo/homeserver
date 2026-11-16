@@ -69,6 +69,16 @@ func TestPublicURL(t *testing.T) {
 	assert.Equal(t, "https://auth.homeserver.lan:18443", c.PublicURL())
 }
 
+func TestHomeServerURL(t *testing.T) {
+	c, err := Load(env(full()))
+	require.NoError(t, err)
+	assert.Equal(t, "https://homeserver.lan/", c.HomeServerURL())
+	c.HTTPSPort = 18443
+	assert.Equal(t, "https://homeserver.lan:18443/", c.HomeServerURL())
+	c.LanDomain = ""
+	assert.Equal(t, "", c.HomeServerURL(), "no domain: no link")
+}
+
 func TestDSN(t *testing.T) {
 	c, err := Load(env(full()))
 	require.NoError(t, err)

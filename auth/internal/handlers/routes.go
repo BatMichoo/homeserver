@@ -21,6 +21,8 @@ type Deps struct {
 	Accounts  *accounts.Service
 	LanDomain string // cookies are set for it; logins only return to it
 	PublicURL string // e.g. https://auth.homeserver.lan
+	// HomeServerURL is the home server's dashboard (the header's "Home ›").
+	HomeServerURL string
 }
 
 // NewRouter is the base router with the health check; NewWebRouter adds

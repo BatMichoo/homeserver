@@ -31,7 +31,8 @@ func newServer(t *testing.T) *server {
 	t.Helper()
 	store := dbtest.New(t)
 	acc := accounts.New(store, 720*time.Hour)
-	r, err := NewWebRouter(Deps{DB: store, Accounts: acc, LanDomain: "homeserver.lan", PublicURL: origin})
+	r, err := NewWebRouter(Deps{DB: store, Accounts: acc, LanDomain: "homeserver.lan", PublicURL: origin,
+		HomeServerURL: "https://homeserver.lan/"})
 	require.NoError(t, err)
 	return &server{t: t, r: r, acc: acc, store: store}
 }
@@ -247,6 +248,7 @@ func TestAccountPages(t *testing.T) {
 	d := doc(t, s.do("GET", "/account", nil, nil, c))
 	assert.Contains(t, d.Find("#content").Text(), "ivan")
 	assert.Equal(t, 1, d.Find(`form[action="/logout"]`).Length(), "theme header logout")
+	assert.Equal(t, "https://homeserver.lan/", d.Find("header a.home-crumb").AttrOr("href", ""), "Home › leads to the dashboard")
 
 	w = s.do("POST", "/account", url.Values{"display_name": {"Иван"}, "email": {"ivan@example.bg"}}, nil, c)
 	assert.Equal(t, 200, w.Code)

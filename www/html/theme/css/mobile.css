@@ -27,6 +27,22 @@
     text-overflow: ellipsis;
   }
 
+  /* "⌂ › App": the house instead of the word, so the bar keeps fitting. */
+  .home-crumb svg {
+    display: block;
+    flex: none;
+  }
+
+  .home-crumb-label {
+    display: none;
+  }
+
+  .app-crumb {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
   .header-left {
     order: 2;
     margin-left: auto;

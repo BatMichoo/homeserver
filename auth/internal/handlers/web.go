@@ -24,7 +24,9 @@ type web struct {
 	acc       *accounts.Service
 	set       *template.Template
 	lanDomain string
-	publicURL string
+	// homeServerURL is the dashboard, for the header's "Home ›".
+	homeServerURL string
+	publicURL     string
 }
 
 // pageData is what the auth page templates get.
@@ -47,7 +49,7 @@ func NewWebRouter(d Deps) (*gin.Engine, error) {
 	if set, err = set.ParseFS(templates.FS, "pages/*.html"); err != nil {
 		return nil, err
 	}
-	h := &web{acc: d.Accounts, set: set, lanDomain: d.LanDomain, publicURL: d.PublicURL}
+	h := &web{acc: d.Accounts, set: set, lanDomain: d.LanDomain, publicURL: d.PublicURL, homeServerURL: d.HomeServerURL}
 
 	r := NewRouter(d)
 	r.Use(OriginCheck(d.LanDomain))
@@ -131,6 +133,7 @@ func (h *web) render(c *gin.Context, status int, content, titleKey string, d pag
 		Header: theme.Header{
 			AppName: app, Lang: d.Lang, LoggedIn: d.User != nil,
 			LanguageURL: "/lang", AccountURL: "/account", LogoutURL: "/logout",
+			HomeServerURL: h.homeServerURL,
 		},
 		Footer:  theme.Footer{Year: time.Now().Year(), AppName: app, Lang: d.Lang},
 		Content: content,

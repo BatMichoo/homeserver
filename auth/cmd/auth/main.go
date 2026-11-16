@@ -70,6 +70,7 @@ func command(ctx context.Context, args []string, out io.Writer, acc *accounts.Se
 func serve(ctx context.Context, cfg *config.Config, database *db.DB, acc *accounts.Service) int {
 	router, err := handlers.NewWebRouter(handlers.Deps{
 		DB: database, Accounts: acc, LanDomain: cfg.LanDomain, PublicURL: cfg.PublicURL(),
+		HomeServerURL: cfg.HomeServerURL(),
 	})
 	if err != nil {
 		log.Print(err)

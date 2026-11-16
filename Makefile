@@ -24,7 +24,7 @@ reload_nginx = if [ -n "$$($(COMPOSE) ps -q --status running nginx)" ]; then $(C
 # The shared look (github.com/BatMichoo/theme) the dashboard uses. Its files
 # are copied into www/html/theme/ and committed; `make theme` refreshes them
 # after changing this version.
-THEME_VERSION := v0.1.0
+THEME_VERSION := v0.2.0
 THEME_FILES := css/tokens.css css/theme.css css/mobile.css css/tablet.css js/theme.js
 
 # up starts everything (issuing the certificate first if needed).

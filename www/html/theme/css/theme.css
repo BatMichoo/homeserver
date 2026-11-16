@@ -69,6 +69,38 @@ button:hover {
   cursor: pointer;
 }
 
+/* "Home › App": Home leads to the home server's dashboard. */
+.header-section h3.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  cursor: default;
+}
+
+.home-crumb {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.home-crumb:hover {
+  color: var(--text);
+}
+
+.home-crumb svg {
+  display: none;
+}
+
+.crumb-sep {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.app-crumb {
+  cursor: pointer;
+}
+
 .settings-menu {
   position: relative;
 }
