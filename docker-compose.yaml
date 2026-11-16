@@ -90,6 +90,7 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD:-}
       AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:-}
       MEDIA_DB_PASSWORD: ${MEDIA_DB_PASSWORD:-}
+      EXPENSER_DB_PASSWORD: ${EXPENSER_DB_PASSWORD:-}
     volumes:
       - ./db:/db:ro
     depends_on:
@@ -148,6 +149,39 @@ services:
       TRANSMISSION_PASSWORD: ${TRANSMISSION_PASSWORD:-}
     volumes:
       - ${MEDIA_DIR:-./media-data}:/data
+    depends_on:
+      db-setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Expenser (expenser/, a submodule): expenser.<LAN_DOMAIN>. The home's
+  # expense tracker; reminds about bills by email.
+  expenser:
+    build:
+      context: ./expenser/server
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    environment:
+      DB_HOST: db
+      DB_NAME: expenser
+      DB_USER: expenser
+      DB_PASS: ${EXPENSER_DB_PASSWORD:-}
+      LAN_DOMAIN: ${LAN_DOMAIN:-}
+      HTTPS_PORT: ${HTTPS_PORT:-443}
+      APP_URL: ${EXPENSER_APP_URL:-}
+      LINK_SECRET: ${EXPENSER_LINK_SECRET:-}
+      APP_TIMEZONE: ${EXPENSER_TIMEZONE:-Europe/Sofia}
+      REMINDER_CHECK_INTERVAL: ${EXPENSER_REMINDER_CHECK_INTERVAL:-24h}
+      SMTP_HOST: ${EXPENSER_SMTP_HOST:-}
+      SMTP_PORT: ${EXPENSER_SMTP_PORT:-587}
+      SMTP_USER: ${EXPENSER_SMTP_USER:-}
+      SMTP_PASSWORD: ${EXPENSER_SMTP_PASSWORD:-}
+      SMTP_FROM: ${EXPENSER_SMTP_FROM:-}
+      GEMINI_API_KEY: ${EXPENSER_GEMINI_API_KEY:-}
     depends_on:
       db-setup:
         condition: service_completed_successfully

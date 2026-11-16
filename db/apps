@@ -2,3 +2,4 @@
 # name, and its password from <NAME>_DB_PASSWORD in .env.
 auth
 media
+expenser

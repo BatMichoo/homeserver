@@ -3,7 +3,7 @@
 The manager of the home server: the reverse proxy (nginx), the home
 certificate authority (CA) that gives every service a trusted HTTPS
 certificate, the login service, and the deployer. Apps are git
-submodules (media now, Expenser later) and know nothing about how they're
+submodules (media and Expenser) and know nothing about how they're
 hosted.
 
 Right now it runs:
@@ -19,13 +19,15 @@ Right now it runs:
 - **media** (submodule `media/`): films and series at
   `https://media.<LAN_DOMAIN>/`, with **jellyfin** and **transmission**
   behind it (see Media below).
+- **expenser** (submodule `expenser/`): the home's expense tracker at
+  `https://expenser.<LAN_DOMAIN>/` (see Expenser below).
 - **deployer** (opt-in, `make autodeploy`): deploys `main` after CI
   passes, one service at a time, and runs the certificate check monthly.
 
 ## Setup
 
 ```sh
-git submodule update --init   # the apps (media)
+git submodule update --init   # the apps (media, expenser)
 cp .env.template .env         # then fill it in
 make up
 ```
@@ -39,10 +41,17 @@ already runs Homeserver, add `POSTGRES_PASSWORD` and `AUTH_DB_PASSWORD`
 to `.env` (see `.env.template`): without them `make up` stops at `db` or
 `db-setup`, and nginx isn't restarted with the new configuration.
 
+Expenser joined later: add `EXPENSER_DB_PASSWORD` and `EXPENSER_LINK_SECRET`
+(and the other `EXPENSER_` settings you want) to `.env` before pulling it,
+then `git submodule update --init` and `make up`; without them `db-setup`
+stops `make up` the same way.
+
 ### Moving from Expenser
 
-Expenser used to run nginx and the home CA itself. To keep the CA your
-devices already trust, bring it over before the first `make up` here:
+Expenser used to run nginx and the home CA itself. Bringing its data and
+users over from its own server is in `docs/moving-from-expenser.md`. To
+bring over only the CA your devices already trust, before the first
+`make up` here:
 
 1. In the Expenser checkout: `make ca-backup` (writes `ca-backup.tgz`).
 2. Copy `ca-backup.tgz` into this folder and run `make ca-restore`.
@@ -231,6 +240,20 @@ matches `stat -c %g /dev/dri/renderD128`, and as a last resort set
 
 Watching on a TV (Google TV) isn't set up yet: TV browsers mostly don't
 trust a home CA.
+
+## Expenser
+
+`https://expenser.<LAN_DOMAIN>/` (the
+[Expenser](https://github.com/BatMichoo/Expenser) submodule): house bills,
+the car and groceries (typed in or read off receipts by Gemini), recurring
+bills with email reminders, and charts. It keeps no accounts: everyone's
+expenses are kept by their auth user id. Its settings are the `EXPENSER_`
+ones in `.env.template`; without `EXPENSER_SMTP_HOST` reminders are only
+logged, and without `EXPENSER_APP_URL` their emails have no links.
+
+The only parts open without login are the snooze links in reminder emails
+(signed with `EXPENSER_LINK_SECRET`) and the page's CSS and scripts;
+`nginx/sites/expenser.conf` has them in a `public.conf` location.
 
 ## Dashboard
 

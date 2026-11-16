@@ -10,6 +10,7 @@ unset COUNTRY_ISO PROVINCE CITY ORG_NAME LAN_DOMAIN LAN_IP CERTS_UID CERTS_GID \
 	POSTGRES_PASSWORD AUTH_DB_PASSWORD SESSION_TTL \
 	MEDIA_DIR MEDIA_UID MEDIA_GID RENDER_GID MEDIA_DB_PASSWORD JELLYFIN_USER JELLYFIN_PASSWORD \
 	JELLYFIN_HWACCEL TRANSMISSION_USER TRANSMISSION_PASSWORD TRANSMISSION_PEER_PORT \
+	EXPENSER_DB_PASSWORD EXPENSER_APP_URL EXPENSER_LINK_SECRET EXPENSER_SMTP_HOST EXPENSER_GEMINI_API_KEY \
 	COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES
 
 project=homeserver-smoke
@@ -44,6 +45,8 @@ JELLYFIN_PASSWORD=smoke-jellyfin
 TRANSMISSION_USER=media
 TRANSMISSION_PASSWORD=smoke-transmission
 TRANSMISSION_PEER_PORT=51499
+EXPENSER_DB_PASSWORD=smoke-expenser
+EXPENSER_LINK_SECRET=smoke-link-secret-0123456789abcdefghij
 ENV
 mkdir -p "$tmp/media/downloads" "$tmp/media/library/Movies" "$tmp/media/library/Shows"
 
@@ -315,3 +318,28 @@ code=$(mediac -b "$jar" -H "Origin: $media_url" -o /dev/null -w '%{http_code}' -
 	-F "torrent=@$tmp/big.torrent" "$media_url/add")
 [ "$code" != 413 ] || fail "media: nginx refuses a 10 MB .torrent"
 echo "media: ok"
+
+# --- expenser ---------------------------------------------------------------
+# expenser.<domain> (the expenser submodule) behind the login; only its
+# snooze links and static files open without one.
+compose up -d --build --wait expenser >/dev/null 2>&1 || fail "expenser: did not start"
+exp_url="https://expenser.homeserver.lan:$HTTPS_PORT"
+expc() { curl -s --cacert "$ca" --resolve "expenser.homeserver.lan:$HTTPS_PORT:127.0.0.1" "$@"; }
+[ "$(compose exec -T expenser wget -qO- http://127.0.0.1:8080/healthz)" = ok ] || fail "expenser: /healthz"
+r=$(expc -o /dev/null -w '%{http_code} %{redirect_url}' "$exp_url/bills")
+[ "$r" = "302 $auth_url/login?next=https%3A%2F%2Fexpenser.homeserver.lan%3A$HTTPS_PORT%2Fbills" ] ||
+	fail "expenser: anonymous page load not sent to login ($r)"
+page=$(expc -b "$jar" "$exp_url/")
+echo "$page" | grep -q 'class="header-section"' || fail "expenser: no theme header"
+echo "$page" | grep -q '<title>Expense Tracker</title>' || fail "expenser: not Expenser"
+echo "$page" | grep -q 'data-path="/bills"' || fail "expenser: no navigation for the logged-in user"
+[ "$(expc -b "$jar" -o /dev/null -w '%{http_code}' "$exp_url/healthz")" = 404 ] || fail "expenser: /healthz reachable"
+# A snooze link opens without login (a bad one says so), styled.
+page=$(expc "$exp_url/snooze/not-a-token")
+echo "$page" | grep -q 'header-section' || fail "expenser: snooze link sent to login"
+css=$(echo "$page" | grep -o '/static/expenser/css/styles.css?v=[0-9a-z]*' | head -1)
+[ -n "$css" ] || fail "expenser: snooze page has no stylesheet"
+[ "$(expc -o /dev/null -w '%{http_code}' "$exp_url$css")" = 200 ] || fail "expenser: its CSS needs a login ($css)"
+# Its port isn't published.
+if docker port "$(compose ps -q expenser)" 8080/tcp >/dev/null 2>&1; then fail "expenser: port 8080 is published"; fi
+echo "expenser: ok"
