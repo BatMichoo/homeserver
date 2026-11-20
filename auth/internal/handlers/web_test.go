@@ -306,3 +306,11 @@ func TestStaticNoListing(t *testing.T) {
 	assert.Equal(t, 404, s.do("GET", "/static/auth/", nil, nil).Code)
 	assert.Equal(t, 200, s.do("GET", "/static/auth/auth.css", nil, nil).Code)
 }
+
+func TestFavicon(t *testing.T) {
+	s := newServer(t)
+	w := s.do("GET", "/favicon.ico", nil, nil)
+	assert.Equal(t, 200, w.Code)
+	assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
+	assert.Equal(t, "\x89PNG", w.Body.String()[:4])
+}

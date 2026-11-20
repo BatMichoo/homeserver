@@ -55,6 +55,9 @@ func NewWebRouter(d Deps) (*gin.Engine, error) {
 	r.Use(OriginCheck(d.LanDomain))
 	r.GET(theme.DefaultPrefix+"/*file", gin.WrapH(http.StripPrefix(theme.DefaultPrefix, theme.Handler())))
 	r.GET("/static/auth/*file", gin.WrapH(http.StripPrefix("/static/auth", filesOnly(http.FS(static.FS)))))
+	// Browsers ask for /favicon.ico on every page (the theme's pages have
+	// no icon link).
+	r.StaticFileFS("/favicon.ico", "favicon.png", http.FS(static.FS))
 
 	r.GET("/", func(c *gin.Context) { c.Redirect(http.StatusSeeOther, "/account") })
 	r.GET("/login", h.getLogin)
