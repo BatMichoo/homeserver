@@ -129,7 +129,13 @@ func lint(args []string, in io.Reader, out io.Writer) int {
 		fmt.Fprintln(out, err)
 		return 2
 	}
-	problems := compose.Lint(p)
+	problems := compose.Lint(p, func(source string) bool {
+		if !filepath.IsAbs(source) {
+			source = filepath.Join(*dir, source)
+		}
+		fi, err := os.Stat(source)
+		return err == nil && fi.Mode().IsRegular()
+	})
 	for _, pr := range problems {
 		fmt.Fprintln(out, pr)
 	}

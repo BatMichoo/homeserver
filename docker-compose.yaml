@@ -6,9 +6,11 @@ services:
     labels:
       # For the deployer (deploy/): check a new config, apply a config
       # change without restarting, and read the certificate's expiry here.
-      homeserver.check: "nginx -t"
-      homeserver.reload: "nginx -s reload"
+      homeserver.check: "nginx -t -c /etc/nginx/main/nginx.conf"
+      homeserver.reload: "nginx -s reload -c /etc/nginx/main/nginx.conf"
       homeserver.tls: "443"
+    # Config from a mounted folder (see nginx/main/nginx.conf for why).
+    command: ["nginx", "-c", "/etc/nginx/main/nginx.conf", "-g", "daemon off;"]
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/rootCA.crt"]
       interval: 10s
@@ -22,8 +24,8 @@ services:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl-params.conf:/etc/nginx/ssl-params.conf:ro
+      # Folders only, never single files: `deploy lint` refuses those here.
+      - ./nginx/main:/etc/nginx/main:ro
       - ./nginx/sites:/etc/nginx/sites:ro
       - ./nginx/snippets:/etc/nginx/snippets:ro
       - ./nginx/templates:/etc/nginx/templates:ro

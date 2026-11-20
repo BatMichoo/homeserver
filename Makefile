@@ -16,7 +16,7 @@ KEY_FILE := $(CERT_FOLDER)/homeserver.lan.key
 CRT_FILE := $(CERT_FOLDER)/homeserver.lan.crt
 
 # reload_nginx makes a running nginx load the certificate from disk.
-reload_nginx = if [ -n "$$($(COMPOSE) ps -q --status running nginx)" ]; then $(COMPOSE) exec -T nginx nginx -s reload; fi
+reload_nginx = if [ -n "$$($(COMPOSE) ps -q --status running nginx)" ]; then $(COMPOSE) exec -T nginx nginx -s reload -c /etc/nginx/main/nginx.conf; fi
 
 .PHONY: up down check test smoke theme certs renew-certs ca-backup ca-restore clean \
 	autodeploy autodeploy-stop autodeploy-logs deploy-e2e
@@ -60,15 +60,14 @@ check:
 		-keyout "$$tmp/homeserver.lan.key" -out "$$tmp/homeserver.lan.crt" 2>/dev/null && \
 	cp "$$tmp/homeserver.lan.crt" "$$tmp/rootCA.crt" && chmod 644 "$$tmp"/* && \
 	docker run --rm \
-		-v "$(CURDIR)/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
-		-v "$(CURDIR)/nginx/ssl-params.conf:/etc/nginx/ssl-params.conf:ro" \
+		-v "$(CURDIR)/nginx/main:/etc/nginx/main:ro" \
 		-v "$(CURDIR)/nginx/sites:/etc/nginx/sites:ro" \
 		-v "$(CURDIR)/nginx/snippets:/etc/nginx/snippets:ro" \
 		-v "$(CURDIR)/nginx/templates:/etc/nginx/templates:ro" \
 		-e HTTPS_PORT=443 -e LAN_DOMAIN=homeserver.lan \
 		-v "$$tmp:/etc/nginx/certs:ro" \
 		--add-host auth:127.0.0.1 \
-		nginx:stable-alpine nginx -t
+		nginx:stable-alpine nginx -t -c /etc/nginx/main/nginx.conf
 
 # test runs the auth service's Go tests against a throwaway Postgres (the
 # container is started with --rm, so stopping it removes it).

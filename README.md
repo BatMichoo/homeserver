@@ -394,7 +394,7 @@ Nothing in the deployer changes. In `docker-compose.yaml`:
 | Label | Example | Meaning |
 |---|---|---|
 | `homeserver.check` | `nginx -t` | run before applying a mounted-file change; failure = don't apply |
-| `homeserver.reload` | `nginx -s reload` | apply a mounted-file change without recreating the container |
+| `homeserver.reload` | `nginx -s reload` | apply a mounted-file change without recreating the container; mount folders, not single files (`deploy lint` checks) |
 | `homeserver.backup` | `postgres` | dump this service's databases before every deploy |
 | `homeserver.every` | `720h` | run this one-shot that often, then reload what depends on it |
 | `homeserver.tls` | `443` | read the certificate's expiry from this port, for the status |

@@ -151,15 +151,21 @@
     },
     "nginx": {
       "restart": "unless-stopped",
-      "command": null,
+      "command": [
+        "nginx",
+        "-c",
+        "/etc/nginx/main/nginx.conf",
+        "-g",
+        "daemon off;"
+      ],
       "entrypoint": null,
       "environment": {
         "HTTPS_PORT": "443"
       },
       "image": "nginx:stable-alpine",
       "labels": {
-        "homeserver.check": "nginx -t",
-        "homeserver.reload": "nginx -s reload",
+        "homeserver.check": "nginx -t -c /etc/nginx/main/nginx.conf",
+        "homeserver.reload": "nginx -s reload -c /etc/nginx/main/nginx.conf",
         "homeserver.tls": "443"
       },
       "networks": {
@@ -168,15 +174,8 @@
       "volumes": [
         {
           "type": "bind",
-          "source": "/code/repos/Homeserver/nginx/nginx.conf",
-          "target": "/etc/nginx/nginx.conf",
-          "read_only": true,
-          "bind": {}
-        },
-        {
-          "type": "bind",
-          "source": "/code/repos/Homeserver/nginx/ssl-params.conf",
-          "target": "/etc/nginx/ssl-params.conf",
+          "source": "/code/repos/Homeserver/nginx/main",
+          "target": "/etc/nginx/main",
           "read_only": true,
           "bind": {}
         },

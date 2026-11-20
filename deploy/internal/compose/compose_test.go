@@ -28,7 +28,7 @@ func TestParseHomeserver(t *testing.T) {
 	assert.Contains(t, sources, "nginx/sites")
 	assert.Contains(t, sources, "www/html")
 	assert.True(t, nginx.Healthcheck)
-	assert.Equal(t, "nginx -s reload", nginx.Labels["homeserver.reload"])
+	assert.Equal(t, "nginx -s reload -c /etc/nginx/main/nginx.conf", nginx.Labels["homeserver.reload"])
 	assert.True(t, nginx.LongRunning())
 
 	assert.Equal(t, "auth", p.Services["auth"].BuildContext)
@@ -55,7 +55,8 @@ func TestOrder(t *testing.T) {
 }
 
 func TestLint(t *testing.T) {
-	assert.Empty(t, Lint(homeserver(t)))
+	noFiles := func(string) bool { return false }
+	assert.Empty(t, Lint(homeserver(t), noFiles))
 	p := Project{Services: map[string]Service{
 		"web":   {Name: "web", Restart: "unless-stopped"},
 		"once":  {Name: "once", Restart: "no"},
@@ -66,7 +67,23 @@ func TestLint(t *testing.T) {
 	assert.Equal(t, []string{
 		"service plain: long-running but has no healthcheck",
 		"service web: long-running but has no healthcheck",
-	}, Lint(p))
+	}, Lint(p, noFiles))
+}
+
+func TestLintFileMounts(t *testing.T) {
+	mounts := []Mount{
+		{Type: "bind", Source: "conf/main.conf"},
+		{Type: "bind", Source: "conf/sites"},
+		{Type: "volume", Source: "data"},
+	}
+	p := Project{Services: map[string]Service{
+		"proxy":   {Name: "proxy", Restart: "no", Mounts: mounts, Labels: map[string]string{"homeserver.reload": "nginx -s reload"}},
+		"restart": {Name: "restart", Restart: "no", Mounts: mounts}, // recreated on change: a file is fine
+	}}
+	isFile := func(s string) bool { return s == "conf/main.conf" || s == "data" }
+	assert.Equal(t, []string{
+		"service proxy: reloads in place but mounts the single file conf/main.conf (mount its folder)",
+	}, Lint(p, isFile))
 }
 
 func TestParseDisabledHealthcheck(t *testing.T) {

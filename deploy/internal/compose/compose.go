@@ -168,14 +168,26 @@ func (p Project) Order() []string {
 }
 
 // Lint reports long-running services without a healthcheck (the deployer
-// relies on healthchecks to know a deploy worked). A service labelled
-// homeserver.lint: skip is left out.
-func Lint(p Project) []string {
+// relies on healthchecks to know a deploy worked; a service labelled
+// homeserver.lint: skip is left out), and services that reload in place
+// (homeserver.reload) with a single file mounted: Docker pins a file mount
+// to the file it found at start, git replaces a file when it updates it,
+// so the reload would read the old one. isFile says whether a mount's
+// source (as in Mount.Source) is a regular file.
+func Lint(p Project, isFile func(source string) bool) []string {
 	var problems []string
 	for _, n := range p.Order() {
 		s := p.Services[n]
 		if s.LongRunning() && !s.Healthcheck && s.Labels["homeserver.lint"] != "skip" {
 			problems = append(problems, fmt.Sprintf("service %s: long-running but has no healthcheck", n))
+		}
+		if s.Labels["homeserver.reload"] == "" {
+			continue
+		}
+		for _, m := range s.Mounts {
+			if m.Type == "bind" && isFile(m.Source) {
+				problems = append(problems, fmt.Sprintf("service %s: reloads in place but mounts the single file %s (mount its folder)", n, m.Source))
+			}
 		}
 	}
 	sort.Strings(problems)
