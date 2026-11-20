@@ -1,6 +1,6 @@
 [submodule "media"]
 	path = media
-	url = https://github.com/BatMichoo/media.git
+	url = git@github.com:BatMichoo/media.git
 [submodule "expenser"]
 	path = expenser
-	url = https://github.com/BatMichoo/Expenser.git
+	url = git@github.com:BatMichoo/Expenser.git
