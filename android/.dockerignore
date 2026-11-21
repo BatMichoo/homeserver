@@ -1,0 +1,4 @@
+# Build outputs only; builder/ must reach the image.
+build/
+.gradle/
+out/
