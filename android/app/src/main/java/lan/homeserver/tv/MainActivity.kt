@@ -252,6 +252,7 @@ class MainActivity : Activity() {
         b = UpdateBanner(
             this, info,
             onInstall = {
+                if (!updater.ensureInstallPermission { b.showError(it) }) return@UpdateBanner
                 b.setBusy()
                 updater.install(info) { b.showError(it) }
             },

@@ -134,11 +134,18 @@ class Updater(private val context: Context, private val urls: AppUrls, private v
         }
     }
 
+    // Call before showing any "busy" state: when the permission is missing this
+    // opens Settings and returns false, and the caller stays idle so the user
+    // can press Install again on coming back. onError gets the hint, or the
+    // manual instructions if this TV has no such Settings screen.
+    fun ensureInstallPermission(onError: (String) -> Unit): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()) return true
+        onError(context.getString(R.string.update_allow_install))
+        askForInstallPermission(onError)
+        return false
+    }
+
     fun install(info: UpdateInfo, onError: (String) -> Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
-            askForInstallPermission(onError)
-            return
-        }
         if (!busy.compareAndSet(false, true)) return
         thread(isDaemon = true) {
             val apk = File(context.cacheDir, APK_NAME)

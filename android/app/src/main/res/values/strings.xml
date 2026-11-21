@@ -12,4 +12,5 @@
     <string name="update_download_failed">The update could not be downloaded.</string>
     <string name="update_install_failed">The update could not be installed: %1$s</string>
     <string name="update_unknown_sources">Allow this app to install updates: open Settings › Apps › Security &amp; restrictions › Unknown sources, enable Home Server, then try again.</string>
+    <string name="update_allow_install">Allow installing from Home Server in Settings, then press Install.</string>
 </resources>

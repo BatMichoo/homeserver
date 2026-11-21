@@ -12,4 +12,5 @@
     <string name="update_download_failed">Обновлението не можа да се изтегли.</string>
     <string name="update_install_failed">Обновлението не можа да се инсталира: %1$s</string>
     <string name="update_unknown_sources">Разрешете на приложението да инсталира обновления: отворете Настройки › Приложения › Сигурност и ограничения › Неизвестни източници, включете Home Server и опитайте отново.</string>
+    <string name="update_allow_install">Разрешете инсталиране от Home Server в Настройки, после натиснете Инсталирай.</string>
 </resources>
