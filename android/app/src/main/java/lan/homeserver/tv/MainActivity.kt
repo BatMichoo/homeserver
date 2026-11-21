@@ -17,10 +17,12 @@ import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import java.io.ByteArrayInputStream
 import java.net.URI
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
@@ -53,7 +55,9 @@ class MainActivity : Activity() {
         overlay = findViewById(R.id.overlay)
         errorView = ErrorView(this) {
             errorView.hide()
-            webView.loadUrl(failedUrl ?: urls.start)
+            // loadUrl skips shouldOverrideUrlLoading, so vet the URL here.
+            val retryUrl = failedUrl?.takeIf { it.startsWith("https://") && hostAllowed(hostOf(it)) }
+            webView.loadUrl(retryUrl ?: urls.start)
         }
         overlay.addView(errorView, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
 
@@ -90,6 +94,15 @@ class MainActivity : Activity() {
             val url = request.url
             val stay = url.scheme == "https" && hostAllowed(url.host)
             return !stay // true = blocked; no Intent is ever fired
+        }
+
+        // shouldOverrideUrlLoading is not called for POSTs (a form or JS submit),
+        // so also refuse any main-frame request that leaves the LAN domain. The
+        // API can't tell iframes from subresources, so those are not covered.
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+            val url = request.url
+            if (!request.isForMainFrame || (url.scheme == "https" && hostAllowed(url.host))) return null
+            return WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
         }
 
         override fun onPageFinished(view: WebView, url: String?) {
