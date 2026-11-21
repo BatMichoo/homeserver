@@ -40,7 +40,12 @@ class ErrorView(context: Context, onRetry: () -> Unit) : LinearLayout(context) {
 
     val showing: Boolean get() = visibility == View.VISIBLE
 
+    // What is on screen, or null when hidden.
+    var failure: LoadFailure? = null
+        private set
+
     fun show(failure: LoadFailure, reinstallUrl: String) {
+        this.failure = failure
         message.text = when (failure) {
             LoadFailure.OFFLINE -> context.getString(R.string.error_offline)
             LoadFailure.UNTRUSTED -> context.getString(R.string.error_untrusted, reinstallUrl)
@@ -51,6 +56,7 @@ class ErrorView(context: Context, onRetry: () -> Unit) : LinearLayout(context) {
     }
 
     fun hide() {
+        failure = null
         visibility = View.GONE
     }
 }

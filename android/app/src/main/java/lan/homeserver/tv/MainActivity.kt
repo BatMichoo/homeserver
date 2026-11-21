@@ -66,7 +66,9 @@ class MainActivity : Activity() {
         overlay.addView(errorView, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
 
         configureWebView()
-        if (savedInstanceState == null) webView.loadUrl(urls.start) else webView.restoreState(savedInstanceState)
+        // restoreState returns null when the saved state can't be used (e.g.
+        // a WebView update in between); the app then starts afresh.
+        if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) webView.loadUrl(urls.start)
 
         updater.check { info -> if (info != null && info.newerThan(BuildConfig.VERSION_CODE)) showUpdateBanner(info) }
     }
@@ -76,7 +78,10 @@ class MainActivity : Activity() {
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
-            mediaPlaybackRequiresUserGesture = true
+            // The player starts the video itself after a page load, and the
+            // remote's OK is not a gesture WebView counts. Navigation never
+            // leaves the LAN domain, so only our own pages can autoplay.
+            mediaPlaybackRequiresUserGesture = false
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             allowFileAccess = false
             allowContentAccess = false
@@ -130,21 +135,33 @@ class MainActivity : Activity() {
             }
             handler.cancel()
             // The main frame's own load fails; subresource errors show nothing.
-            if (error.url == view.url || error.url == pendingUrl) {
-                failedUrl = error.url
-                errorView.show(LoadFailure.fromSslError(), urls.reinstall)
-            }
+            if (error.url == view.url || error.url == pendingUrl) showFailure(LoadFailure.fromSslError(), error.url)
         }
 
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
             if (!request.isForMainFrame) return
-            failedUrl = request.url.toString()
-            errorView.show(LoadFailure.fromWebViewError(error.errorCode), urls.reinstall)
+            showFailure(LoadFailure.fromWebViewError(error.errorCode), request.url.toString())
         }
 
+        // A new page has nothing playing yet; its video reports itself again.
         override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
             pendingUrl = url
+            setPlaying(false)
         }
+
+        // htmx moves between pages without a page load (pushState), and the
+        // video it swapped away sends no pause. Forget the old state and let
+        // the page say whether anything still plays.
+        override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+            setPlaying(false)
+            if (hostAllowed(hostOf(url))) view.evaluateJavascript(PLAYBACK_RECHECK, null)
+        }
+    }
+
+    private fun showFailure(failure: LoadFailure, url: String?) {
+        if (!LoadFailure.replaces(errorView.failure, failedUrl, failure, url)) return
+        failedUrl = url
+        errorView.show(failure, urls.reinstall)
     }
 
     // The URL of the load in progress: on a first-load SSL failure view.url is
@@ -157,6 +174,9 @@ class MainActivity : Activity() {
             customView = view
             customViewCallback = callback
             overlay.addView(view, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            // The remote's keys go to the focused view: the video, not the
+            // WebView hidden underneath.
+            view.requestFocus()
             setFullscreenBars(true)
             updateKeepScreenOn()
         }
@@ -179,10 +199,14 @@ class MainActivity : Activity() {
             runOnUiThread {
                 // Defence in depth: only our own pages may act on the bridge.
                 if (!hostAllowed(hostOf(webView.url))) return@runOnUiThread
-                this@MainActivity.playing = playing
-                updateKeepScreenOn()
+                this@MainActivity.setPlaying(playing)
             }
         }
+    }
+
+    private fun setPlaying(on: Boolean) {
+        playing = on
+        updateKeepScreenOn()
     }
 
     private fun updateKeepScreenOn() {
@@ -225,9 +249,11 @@ class MainActivity : Activity() {
         }
     }
 
-    // The remote's media keys go to the page (it handles them as of Task 7).
+    // The remote's media keys go to the page's player. In fullscreen the
+    // video is WebView's custom view (the WebView itself is left behind), so
+    // they go there; whatever neither takes gets the normal dispatch.
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode in MEDIA_KEYS) return webView.dispatchKeyEvent(event)
+        if (event.keyCode in MEDIA_KEYS && (customView ?: webView).dispatchKeyEvent(event)) return true
         return super.dispatchKeyEvent(event)
     }
 
@@ -282,17 +308,31 @@ class MainActivity : Activity() {
             KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_MEDIA_REWIND,
         )
 
-        // Capture phase, because media events don't bubble.
+        // Reports whether any video on the page is playing (neither paused
+        // nor ended), so one video stopping doesn't clear another's state. It
+        // runs on the media events (capture phase: they don't bubble), after
+        // htmx swaps a page in or restores one (a swapped-out video sends no
+        // pause), and the app calls it after each history change. Leaving the
+        // page stops whatever played.
         const val PLAYBACK_SCRIPT = """
             (function () {
               if (window.__hsPlaybackHook) return;
-              window.__hsPlaybackHook = true;
-              ['play', 'pause', 'ended'].forEach(function (t) {
-                document.addEventListener(t, function () {
-                  if (window.HomeServerApp) HomeServerApp.setPlaying(t === 'play');
-                }, true);
+              function report() {
+                if (!window.HomeServerApp) return;
+                var playing = Array.prototype.some.call(document.querySelectorAll('video'), function (v) {
+                  return !v.paused && !v.ended;
+                });
+                HomeServerApp.setPlaying(playing);
+              }
+              window.__hsPlaybackHook = report;
+              ['play', 'pause', 'ended'].forEach(function (t) { document.addEventListener(t, report, true); });
+              ['htmx:afterSwap', 'htmx:historyRestore'].forEach(function (t) { document.addEventListener(t, report); });
+              window.addEventListener('pagehide', function () {
+                if (window.HomeServerApp) HomeServerApp.setPlaying(false);
               });
             })();
         """
+
+        const val PLAYBACK_RECHECK = "window.__hsPlaybackHook && window.__hsPlaybackHook();"
     }
 }
