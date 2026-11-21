@@ -2,11 +2,13 @@ package lan.homeserver.tv
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Bitmap
 import android.net.http.SslError
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -42,6 +44,8 @@ class MainActivity : Activity() {
         }
     }
 
+    private val updater by lazy { Updater(this, urls, homeCa) }
+    private var banner: UpdateBanner? = null
     private val chrome = Chrome()
     private var failedUrl: String? = null
     private var playing = false
@@ -63,6 +67,8 @@ class MainActivity : Activity() {
 
         configureWebView()
         if (savedInstanceState == null) webView.loadUrl(urls.start) else webView.restoreState(savedInstanceState)
+
+        updater.check { info -> if (info != null && info.newerThan(BuildConfig.VERSION_CODE)) showUpdateBanner(info) }
     }
 
     @Suppress("SetJavaScriptEnabled") // the media site is a JS app
@@ -240,8 +246,34 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
-    // Hook for the updater (Task 4); it adds its banner into `overlay`.
-    fun showUpdateBanner(info: UpdateInfo) {}
+    private fun showUpdateBanner(info: UpdateInfo) {
+        if (banner != null) return
+        lateinit var b: UpdateBanner
+        b = UpdateBanner(
+            this, info,
+            onInstall = {
+                b.setBusy()
+                updater.install(info) { b.showError(it) }
+            },
+            onLater = {
+                overlay.removeView(b)
+                banner = null
+                webView.requestFocus()
+            },
+        )
+        banner = b
+        overlay.addView(
+            b,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM),
+        )
+        b.requestFocus()
+    }
+
+    // The installer's answer comes back here (the activity is singleTop).
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        updater.handleResult(intent) { banner?.showError(it) }
+    }
 
     private companion object {
         val MEDIA_KEYS = setOf(

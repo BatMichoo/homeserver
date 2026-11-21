@@ -5,4 +5,11 @@
     <string name="error_untrusted">This device no longer trusts the home server\'s certificate. Reinstall the app from: %1$s</string>
     <string name="error_other">The page could not be loaded.</string>
     <string name="retry">Retry</string>
+    <string name="update_available">Update available: %1$s</string>
+    <string name="install">Install</string>
+    <string name="later">Later</string>
+    <string name="update_downloading">Downloading the update…</string>
+    <string name="update_download_failed">The update could not be downloaded.</string>
+    <string name="update_install_failed">The update could not be installed: %1$s</string>
+    <string name="update_unknown_sources">Allow this app to install updates: open Settings › Apps › Security &amp; restrictions › Unknown sources, enable Home Server, then try again.</string>
 </resources>
