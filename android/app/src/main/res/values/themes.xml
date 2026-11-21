@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- No action bar (the page has its own header), and a black window so
+         no white flashes up before the WebView draws. -->
+    <style name="Theme.HomeServer" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>
