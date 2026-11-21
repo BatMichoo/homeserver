@@ -18,7 +18,7 @@ CRT_FILE := $(CERT_FOLDER)/homeserver.lan.crt
 # reload_nginx makes a running nginx load the certificate from disk.
 reload_nginx = if [ -n "$$($(COMPOSE) ps -q --status running nginx)" ]; then $(COMPOSE) exec -T nginx nginx -s reload -c /etc/nginx/main/nginx.conf; fi
 
-.PHONY: up down check test smoke theme certs renew-certs ca-backup ca-restore clean \
+.PHONY: up down check test smoke theme certs renew-certs ca-backup ca-restore app-backup app-restore android-test clean \
 	autodeploy autodeploy-stop autodeploy-logs deploy-e2e
 
 # The shared look (github.com/BatMichoo/theme) the dashboard uses. Its files
@@ -32,12 +32,17 @@ THEME_FILES := css/tokens.css css/theme.css css/mobile.css css/tablet.css js/the
 # a deploy (and wait up to 10 minutes for one to finish).
 LOCK := flock -w 600 .deploy/lock
 
+# The TV app's output folder (TV_APP_DIR in .env, else .deploy/tv), made here
+# so it belongs to you, like .deploy/public.
+TV_FOLDER = $$(v=$$(sed -n 's/^TV_APP_DIR=//p' .env 2>/dev/null | tail -1 | tr -d "\"'"); echo "$${v:-.deploy/tv}")
+
 # The media folder (MEDIA_DIR in .env, else ./media-data). Its folders are
 # made here, so they belong to you rather than to Docker's root.
 MEDIA_FOLDER = $$(v=$$(sed -n 's/^MEDIA_DIR=//p' .env 2>/dev/null | tail -1 | tr -d "\"'"); echo "$${v:-./media-data}")
 
 up:
 	@mkdir -p $(CERT_FOLDER) .deploy/public
+	@d=$(TV_FOLDER); mkdir -p "$$d"
 	@d=$(MEDIA_FOLDER); mkdir -p "$$d/downloads" "$$d/library/Movies" "$$d/library/Shows"
 	$(LOCK) $(COMPOSE) up -d --build
 
@@ -128,6 +133,31 @@ ca-restore:
 	$(COMPOSE) run --rm -T --entrypoint tar certs xzf - -C /ca < ca-backup.tgz
 	@echo "Restored the home CA; run make certs to issue a certificate from it (nginx reloads it)."
 
+# app-backup saves the TV app's signing key (keep it private; without it
+# installed copies can't be updated, since Android refuses a different key).
+app-backup:
+	$(COMPOSE) build -q android
+	$(COMPOSE) run --rm -T --no-deps --entrypoint tar android czf - -C /data . > app-backup.tgz
+	@chmod 600 app-backup.tgz
+	@echo "Saved the TV app's key to app-backup.tgz; keep it somewhere safe and private."
+
+# app-restore puts an app-backup.tgz back (e.g. on a new server).
+app-restore:
+	$(COMPOSE) build -q android
+	$(COMPOSE) run --rm -T --no-deps --entrypoint tar android xzf - -C /data < app-backup.tgz
+	@echo "Restored the TV app's key; the next build (make up) signs with it."
+
+# android-test builds the builder image, then runs the app's Gradle tests
+# (with a test CA) and the build loop's tests inside it. /src in the image is
+# a copy, hence the rebuild. The volume keeps Gradle's downloads between runs.
+android-test:
+	docker build -q -t hs-android-test android
+	docker run --rm -v hs-android-test-gradle:/cache/gradle --entrypoint sh hs-android-test -c '\
+		gradle --no-daemon test \
+			-PlanDomain=homeserver.lan -PhttpsPort=443 -PhttpPort=80 \
+			-PcaFile=/src/app/src/test/resources/ca.pem -PversionCode=1 -PversionName=test && \
+		sh /src/builder/test-build-loop.sh'
+
 # clean removes the server certificate; the home CA (ca-data volume) stays.
 clean:
 	@rm -f $(KEY_FILE) $(CRT_FILE)
@@ -140,6 +170,7 @@ AUTODEPLOY_ENV := AUTODEPLOY_DIR=$(CURDIR) \
 
 autodeploy:
 	@mkdir -p .deploy/public
+	@d=$(TV_FOLDER); mkdir -p "$$d"
 	$(AUTODEPLOY_ENV) docker compose --profile autodeploy up -d --build deployer
 
 autodeploy-stop:

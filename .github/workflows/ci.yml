@@ -59,6 +59,15 @@ jobs:
       - name: make smoke
         run: make smoke
 
+  android-test:
+    name: Android tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: make android-test
+        run: make android-test
+
   deploy-e2e:
     name: Deployer end-to-end
     runs-on: ubuntu-latest

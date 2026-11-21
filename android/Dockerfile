@@ -40,8 +40,10 @@ RUN curl -fsSL -o /tmp/cmdline.zip "https://dl.google.com/android/repository/${C
 
 # Non-root; /cache/gradle is meant to be a volume so dependencies download once.
 RUN useradd -m -u 1000 builder \
- && mkdir -p /cache/gradle /src \
- && chown -R builder:builder /opt/android-sdk /cache /src
+ && mkdir -p /cache/gradle /data /out /src \
+ && chown -R builder:builder /opt/android-sdk /cache /data /out /src
+# /data (keystore, build state) and /out (published APK) exist and belong to
+# builder, so new android-data / android-gradle volumes inherit that owner.
 
 COPY --chown=builder:builder . /src
 USER builder

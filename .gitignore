@@ -1,6 +1,7 @@
 .env
 nginx/certs/
 ca-backup.tgz
+app-backup.tgz
 *.key
 *.crt
 docs/

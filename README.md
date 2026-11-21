@@ -79,6 +79,7 @@ why (usually a missing `LAN_DOMAIN` or `LAN_IP`).
 | `POSTGRES_PASSWORD` | Postgres superuser password (only `db-setup` uses it) | long random string |
 | `AUTH_DB_PASSWORD` | Password of the auth service's database role | long random string |
 | `SESSION_TTL` | How long a login lasts without use (default `720h`, at least `1h`) | `720h` |
+| `TV_APP_DIR` | Where the TV app's APK is published (default `./.deploy/tv`); see TV app | `./.deploy/tv` |
 | `HTTP_PORT`, `HTTPS_PORT` | Ports nginx listens on (default 80 and 443); redirects keep a non-default HTTPS port | `8443` |
 | `MEDIA_DIR` | The media folder on the media drive (default `./media-data`); see Media | `/mnt/media` |
 | `MEDIA_UID`, `MEDIA_GID` | Owner of the files in it (default 1000) | `1000` |
@@ -108,6 +109,7 @@ Renewals don't need this again; only a new CA does.
 - `make certs`: issue a certificate now, if needed.
 - `make renew-certs`: issue one now regardless, and restart nginx.
 - `make ca-backup` / `make ca-restore`: save the CA to `ca-backup.tgz` and put it back, for example on a new server. Keep the backup private: the CA's key can sign a certificate for any website, and your devices would believe it. If the CA is lost, every device has to trust a new one.
+- `make app-backup` / `make app-restore`: the same for the TV app's signing key (`app-backup.tgz`; see TV app).
 
 The deployer runs the certificate check every 30 days and has nginx load
 a renewed certificate. Without it, run `make certs` now and then: it
@@ -254,6 +256,28 @@ logged, and without `EXPENSER_APP_URL` their emails have no links.
 The only parts open without login are the snooze links in reminder emails
 (signed with `EXPENSER_LINK_SECRET`) and the page's CSS and scripts;
 `nginx/sites/expenser.conf` has them in a `public.conf` location.
+
+## TV app
+
+`android/` is a small Android TV app that opens the home server's web UI in
+a full-screen WebView. The `android` container compiles it on the server
+itself, with your home CA and `LAN_DOMAIN` built in (so the TV trusts the
+server's HTTPS without installing the CA) and signs it with a key it makes
+once. The first build takes a few minutes and needs the network; after that
+it rebuilds by itself when the app, the CA or the settings change, and
+publishes `tv.apk` and `tv.json` (in `TV_APP_DIR`).
+
+**Install:** on the TV, open `http://<LAN_DOMAIN>/tv.apk` in a browser or a
+downloader app, or sideload it from a computer with
+`adb connect <TV IP>` and `adb install tv.apk`. Allow installing from
+unknown sources once when asked. Later updates are offered in the app.
+
+**Back up the app's key** with `make app-backup` (writes `app-backup.tgz`;
+`make app-restore` puts it back). Android only updates an app that is signed
+with the same key, so without the backup a new server means uninstalling the
+app from every device first. Keep the file private.
+
+`make android-test` runs the app's tests.
 
 ## Dashboard
 

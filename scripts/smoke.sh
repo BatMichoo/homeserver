@@ -10,7 +10,7 @@ unset COUNTRY_ISO PROVINCE CITY ORG_NAME LAN_DOMAIN LAN_IP CERTS_UID CERTS_GID \
 	POSTGRES_PASSWORD AUTH_DB_PASSWORD SESSION_TTL \
 	MEDIA_DIR MEDIA_UID MEDIA_GID RENDER_GID MEDIA_DB_PASSWORD JELLYFIN_USER JELLYFIN_PASSWORD \
 	JELLYFIN_HWACCEL TRANSMISSION_USER TRANSMISSION_PASSWORD TRANSMISSION_PEER_PORT \
-	EXPENSER_DB_PASSWORD EXPENSER_APP_URL EXPENSER_LINK_SECRET EXPENSER_SMTP_HOST EXPENSER_GEMINI_API_KEY \
+	TV_APP_DIR EXPENSER_DB_PASSWORD EXPENSER_APP_URL EXPENSER_LINK_SECRET EXPENSER_SMTP_HOST EXPENSER_GEMINI_API_KEY \
 	COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES
 
 project=homeserver-smoke
@@ -18,7 +18,9 @@ tmp=$(mktemp -d)
 export CERTS_DIR="$tmp/certs" HTTP_PORT=18080 HTTPS_PORT=18443
 # What the deployer publishes for the dashboard (a sample here).
 export DEPLOY_PUBLIC_DIR="$tmp/deploy-public"
-mkdir -p "$DEPLOY_PUBLIC_DIR"
+# Where the android service publishes the TV app (made here, as make up does).
+export TV_APP_DIR="$tmp/tv"
+mkdir -p "$DEPLOY_PUBLIC_DIR" "$TV_APP_DIR"
 cat >"$DEPLOY_PUBLIC_DIR/status.json" <<'JSON'
 {"version": 1, "last_result": "partial", "deployed": {"commit": "abc1234", "subject": "smoke", "at": "2026-11-15T10:00:00Z"},
  "held": [{"service": "web", "commit": "abc1234", "since": "2026-11-15T10:00:00Z", "reason": "unhealthy"}],
@@ -374,3 +376,38 @@ r=$(https -o /dev/null -w '%{http_code} %{redirect_url}' "https://homeserver.lan
 [ "$r" = "302 $exp_url/" ] || fail "expenser: /go/expenser doesn't lead to it ($r)"
 [ "$(https "https://homeserver.lan:$HTTPS_PORT/status/expenser")" = ok ] || fail "expenser: /status/expenser"
 echo "expenser: ok"
+
+# --- android (TV app) --------------------------------------------------------
+# The android service really builds the APK (Gradle, a few minutes; needs the
+# network the first time), so wait for tv.json up to 15 minutes. Its owner
+# must be this user (OUT_UID), and it is published after tv.apk.
+compose up -d --build --wait android >/dev/null 2>&1 || fail "android: did not start (healthcheck)"
+echo "android: waiting for the first APK build (up to 15 minutes)..."
+for _ in $(seq 180); do
+	[ -s "$TV_APP_DIR/tv.json" ] && break
+	[ -n "$(compose ps -q --status running android)" ] || fail "android: the builder stopped: $(compose logs --tail 20 android 2>&1)"
+	sleep 5
+done
+[ -s "$TV_APP_DIR/tv.json" ] || fail "android: no tv.json after 15 minutes: $(compose logs --tail 20 android 2>&1)"
+[ "$(stat -c %u "$TV_APP_DIR/tv.apk")" = "$(id -u)" ] || fail "android: tv.apk not owned by $(id -u)"
+
+apk_url="http://127.0.0.1:$HTTP_PORT/tv.apk"
+headers=$(curl -s -o /dev/null -D - "$apk_url" | tr -d '\r')
+echo "$headers" | grep -q '^HTTP/[0-9.]* 200' || fail "android: GET $apk_url is not 200: $headers"
+echo "$headers" | grep -qix 'Content-Type: application/vnd.android.package-archive' || fail "android: tv.apk has the wrong content type: $headers"
+for h in "Cache-Control: no-cache" "X-Content-Type-Options: nosniff"; do
+	echo "$headers" | grep -qx "$h" || fail "android: tv.apk lacks '$h'"
+done
+curl -s "$apk_url" | cmp -s - "$TV_APP_DIR/tv.apk" || fail "android: served tv.apk differs from the built one"
+# An APK is a zip.
+[ "$(curl -s "$apk_url" | head -c 2)" = PK ] || fail "android: tv.apk is not a zip"
+
+json=$(https "https://homeserver.lan:$HTTPS_PORT/tv.json")
+echo "$json" | grep -Eq '^\{"versionCode": [1-9][0-9]*, "versionName": "[^"]+", "apk": "/tv.apk"\}$' ||
+	fail "android: tv.json is not the expected JSON: $json"
+https -s -o /dev/null -D - "https://homeserver.lan:$HTTPS_PORT/tv.json" | tr -d '\r' |
+	grep -qix 'Content-Type: application/json' || fail "android: tv.json has the wrong content type"
+# Over plain HTTP tv.json still redirects to HTTPS (only the APK is open).
+r=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "http://127.0.0.1:$HTTP_PORT/tv.json")
+[ "$r" = "301 https://127.0.0.1:$HTTPS_PORT/tv.json" ] || fail "android: HTTP /tv.json not redirected to HTTPS ($r)"
+echo "android: ok (tv.apk and tv.json served)"

@@ -31,6 +31,8 @@ services:
       - ./nginx/templates:/etc/nginx/templates:ro
       - ${CERTS_DIR:-./nginx/certs}:/etc/nginx/certs:ro
       - ./www/html:/var/www/html:ro
+      # The TV app's APK and version file, published by android.
+      - ${TV_APP_DIR:-./.deploy/tv}:/var/www/tv:ro
       # The deployer's status.json, for the dashboard.
       - ${DEPLOY_PUBLIC_DIR:-./.deploy/public}:/var/www/deploy:ro
     restart: unless-stopped
@@ -62,6 +64,37 @@ services:
       - ca-data:/ca
       - ${CERTS_DIR:-./nginx/certs}:/out
     restart: "no"
+
+  # Builds the Android TV app (android/) with the home CA and LAN domain baked
+  # in, signs it with a key kept in android-data, and publishes tv.apk and
+  # tv.json for nginx. Rebuilds when the app, the CA or the settings change
+  # (checked hourly). The first build takes minutes and needs the network.
+  android:
+    build:
+      context: ./android
+    init: true
+    stop_grace_period: 30s
+    mem_limit: 3g
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    environment:
+      LAN_DOMAIN: ${LAN_DOMAIN:-}
+      HTTPS_PORT: ${HTTPS_PORT:-443}
+      HTTP_PORT: ${HTTP_PORT:-80}
+      OUT_UID: ${CERTS_UID:-1000}
+      OUT_GID: ${CERTS_GID:-1000}
+    volumes:
+      - android-data:/data
+      - android-gradle:/cache/gradle
+      - ${CERTS_DIR:-./nginx/certs}:/ca:ro
+      - ${TV_APP_DIR:-./.deploy/tv}:/out
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
   # Postgres for the home server's services. Each gets its own database and
   # role, made by db-setup.
@@ -269,6 +302,10 @@ volumes:
   # The home CA: back it up (make ca-backup). Losing it means every device
   # has to trust a new CA.
   ca-data:
+  # The TV app's signing key (back it up: make app-backup; without it
+  # installed copies can't update) and Gradle's downloaded dependencies.
+  android-data:
+  android-gradle:
   # Jellyfin's settings and metadata (rebuilt by a rescan if lost), its
   # conversion scratch, and Transmission's settings.
   jellyfin-config:
