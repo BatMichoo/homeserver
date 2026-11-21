@@ -146,8 +146,8 @@ app-backup:
 # builder's state is replaced, not merged, and the recorded input hash is
 # dropped, so the next pass rebuilds and re-signs the app with the restored
 # key even when nothing else changed (otherwise the APK signed with the other
-# key would count as up to date). The service is started again if it was
-# running.
+# key would count as up to date). The same container is started again if it
+# was running (by id: `compose start` would re-check its dependencies).
 app-restore:
 	@test -s app-backup.tgz || { echo "app-backup.tgz is missing"; exit 1; }
 	$(COMPOSE) build -q android
@@ -155,7 +155,7 @@ app-restore:
 	$(COMPOSE) stop android && \
 	$(COMPOSE) run --rm -T --no-deps --user builder --entrypoint sh android -c \
 		'find /data -mindepth 1 -delete && tar xzf - -C /data && rm -f /data/inputs.sha256' < app-backup.tgz && \
-	if [ -n "$$running" ]; then $(COMPOSE) start android; fi
+	if [ -n "$$running" ]; then docker start $$running >/dev/null; fi
 	@echo "Restored the TV app's key; the next build signs with it (make up, or now if android was running)."
 
 # android-test builds the builder image, then runs the app's Gradle tests
