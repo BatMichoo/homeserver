@@ -113,13 +113,75 @@ test_interrupted_build_keeps_previous() {
 	FAKE_MODE='kill' run
 	check "apk unchanged" test "$(sum "$OUT_DIR/tv.apk")" = "$apk" || return 1
 	check "json unchanged" test "$(sum "$OUT_DIR/tv.json")" = "$json" || return 1
-	check "counter unchanged" test "$(counter)" = 1 || return 1
 	check "hash unchanged" test "$(cat "$DATA_DIR/inputs.sha256")" = "$hash" || return 1
+	# the code of an unfinished build is spent, never reused
+	check "counter burned (2)" test "$(counter)" = 2 || return 1
 	FAKE_MODE='fail' run
-	check "failed build keeps counter" test "$(counter)" = 1 || return 1
+	check "failed build burns 3" test "$(counter)" = 3 || return 1
 	run || return 1
-	check "next run builds 2" has '"versionCode": 2[,}]' "$OUT_DIR/tv.json" || return 1
+	check "next run builds 4" has '"versionCode": 4[,}]' "$OUT_DIR/tv.json" || return 1
 	check "temp build dirs removed" no_files "${TMPDIR:-/tmp}" 'tv-build.*'
+}
+
+# shim <name> <script>: a command placed first on PATH, to break one step.
+shim() {
+	mkdir -p "$t/bin"
+	printf '#!/bin/sh\n%s\n' "$2" >"$t/bin/$1"
+	chmod +x "$t/bin/$1"
+}
+
+test_publish_failure_keeps_previous() {
+	new_env pubfail
+	export TMPDIR="$t/tmp" && mkdir -p "$TMPDIR"
+	run || return 1
+	apk=$(sum "$OUT_DIR/tv.apk") json=$(sum "$OUT_DIR/tv.json") hash=$(cat "$DATA_DIR/inputs.sha256")
+	echo "class B" >"$SRC_DIR/app/A.kt"
+	# copying the APK to the output dir fails (as a full disk would)
+	# shellcheck disable=SC2016 # the shim body must stay literal
+	shim cp 'for a; do last=$a; done; case $last in *.tv.apk.tmp) exit 1;; esac; exec /bin/cp "$@"'
+	rc=0
+	PATH="$t/bin:$PATH" run || rc=$?
+	check "pass reports failure" test "$rc" != 0 || return 1
+	check "not logged as published" test -z "$(grep 'published version' "$t/log")" || return 1
+	check "apk unchanged" test "$(sum "$OUT_DIR/tv.apk")" = "$apk" || return 1
+	check "json unchanged" test "$(sum "$OUT_DIR/tv.json")" = "$json" || return 1
+	check "hash unchanged" test "$(cat "$DATA_DIR/inputs.sha256")" = "$hash" || return 1
+	check "code 2 burned" test "$(counter)" = 2 || return 1
+	check "no temp files left" no_files "$OUT_DIR" '.*' || return 1
+	run || return 1
+	check "retry publishes 3" has '"versionCode": 3[,}]' "$OUT_DIR/tv.json" || return 1
+	check "apk matches json" has 'PversionCode=3' "$OUT_DIR/tv.apk"
+}
+
+test_keystore_failure_stops() {
+	new_env kfail
+	shim keytool 'exit 1'
+	rc=0
+	PATH="$t/bin:$PATH" run || rc=$?
+	check "pass reports failure" test "$rc" != 0 || return 1
+	check "no keystore" test ! -e "$DATA_DIR/keystore.p12" || return 1
+	check "no pass file" test ! -e "$DATA_DIR/keystore.pass" || return 1
+	check "no gradle call" test "$(calls)" = 0
+}
+
+# The loop itself is killed right after tv.apk is moved into place, before
+# tv.json: the published pair is torn. Codes must never repeat.
+test_killed_between_publish_steps() {
+	new_env torn
+	export TMPDIR="$t/tmp" && mkdir -p "$TMPDIR"
+	run || return 1
+	echo "class B" >"$SRC_DIR/app/A.kt"
+	# shellcheck disable=SC2016 # the shim body must stay literal
+	shim mv 'case $2 in */tv.apk) /bin/mv "$@"; kill -9 $PPID; exit 0;; esac; exec /bin/mv "$@"'
+	PATH="$t/bin:$PATH" run
+	check "new apk is published (code 2)" has 'PversionCode=2' "$OUT_DIR/tv.apk" || return 1
+	check "json still the old one" has '"versionCode": 1[,}]' "$OUT_DIR/tv.json" || return 1
+	check "counter covers the published apk" test "$(counter)" = 2 || return 1
+	# inputs unchanged since, so without the hash being recorded it rebuilds
+	run || return 1
+	check "next build is 3, above the published 2" has '"versionCode": 3[,}]' "$OUT_DIR/tv.json" || return 1
+	check "apk matches json" has 'PversionCode=3' "$OUT_DIR/tv.apk" || return 1
+	check "counter 3" test "$(counter)" = 3
 }
 
 test_low_disk_skips() {
@@ -143,7 +205,8 @@ test_empty_domain_waits() {
 }
 
 for name in test_first_build_publishes test_unchanged_inputs_skip test_counter_increases \
-	test_keystore_kept test_interrupted_build_keeps_previous test_low_disk_skips \
+	test_keystore_kept test_interrupted_build_keeps_previous test_publish_failure_keeps_previous \
+	test_keystore_failure_stops test_killed_between_publish_steps test_low_disk_skips \
 	test_missing_ca_waits test_empty_domain_waits; do
 	if "$name"; then echo "ok   $name"; else
 		echo "FAIL $name"

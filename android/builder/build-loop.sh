@@ -65,14 +65,14 @@ make_keystore() {
 	log "creating the signing keystore"
 	(
 		umask 077
-		od -An -tx1 -N24 /dev/urandom | tr -d ' \n' >"$DATA_DIR/.keystore.pass.tmp"
+		od -An -tx1 -N24 /dev/urandom | tr -d ' \n' >"$DATA_DIR/.keystore.pass.tmp" || exit 1
 		rm -f "$DATA_DIR/.keystore.p12.tmp"
 		keytool -genkeypair -keystore "$DATA_DIR/.keystore.p12.tmp" -storetype PKCS12 \
 			-storepass:file "$DATA_DIR/.keystore.pass.tmp" -keypass:file "$DATA_DIR/.keystore.pass.tmp" \
 			-alias tv -keyalg RSA -keysize 3072 -validity 36500 \
-			-dname "CN=Home Server TV" >/dev/null
-		mv "$DATA_DIR/.keystore.pass.tmp" "$DATA_DIR/keystore.pass"
-		mv "$DATA_DIR/.keystore.p12.tmp" "$DATA_DIR/keystore.p12"
+			-dname "CN=Home Server TV" >/dev/null || exit 1
+		mv "$DATA_DIR/.keystore.pass.tmp" "$DATA_DIR/keystore.pass" || exit 1
+		mv "$DATA_DIR/.keystore.p12.tmp" "$DATA_DIR/keystore.p12" || exit 1
 	)
 }
 
@@ -90,13 +90,33 @@ write_atomic() {
 	cat >"$1.tmp" && mv "$1.tmp" "$1"
 }
 
+# publish moves the built APK and its tv.json into OUT_DIR, apk first, each
+# through a temp name. Every step must succeed.
+publish() {
+	cp "$1" "$OUT_DIR/.tv.apk.tmp" || return 1
+	printf '{"versionCode": %s, "versionName": "%s", "apk": "/tv.apk"}\n' "$2" "$3" >"$OUT_DIR/.tv.json.tmp" || return 1
+	give_away "$OUT_DIR/.tv.apk.tmp"
+	give_away "$OUT_DIR/.tv.json.tmp"
+	chmod 644 "$OUT_DIR/.tv.apk.tmp" "$OUT_DIR/.tv.json.tmp" || return 1
+	mv "$OUT_DIR/.tv.apk.tmp" "$OUT_DIR/tv.apk" || return 1
+	mv "$OUT_DIR/.tv.json.tmp" "$OUT_DIR/tv.json" || return 1
+}
+
 # build runs Gradle in a copy of the sources (the sources may be read-only and
 # Gradle writes next to them), then publishes the result. Returns 1 on failure.
 build() {
 	code=$1 name=$2 hash=$3
-	work=$(mktemp -d "${TMPDIR:-/tmp}/tv-build.XXXXXX")
-	cp -a "$SRC_DIR/." "$work/"
-	find "$work" -depth -type d \( -name build -o -name .gradle -o -name out \) -exec rm -rf {} +
+	# Every step is checked with || return 1: this runs inside `||`, where
+	# the shell ignores `set -e`, so a failed step would otherwise be skipped.
+	work=$(mktemp -d "${TMPDIR:-/tmp}/tv-build.XXXXXX") || return 1
+	cp -a "$SRC_DIR/." "$work/" || return 1
+	find "$work" -depth -type d \( -name build -o -name .gradle -o -name out \) -exec rm -rf {} + || return 1
+
+	# The version code is spent before anything is built or published. A
+	# crash while publishing then never lets the next build reuse a code that
+	# may already be installed on a TV (Android refuses a different APK with
+	# the same code). A code lost to a failed build is harmless.
+	echo "$code" | write_atomic "$DATA_DIR/counter" || return 1
 
 	log "building version $name"
 	if ! (
@@ -118,16 +138,13 @@ build() {
 		return 1
 	fi
 
-	cp "$apk" "$OUT_DIR/.tv.apk.tmp"
-	printf '{"versionCode": %s, "versionName": "%s", "apk": "/tv.apk"}\n' "$code" "$name" >"$OUT_DIR/.tv.json.tmp"
-	give_away "$OUT_DIR/.tv.apk.tmp"
-	give_away "$OUT_DIR/.tv.json.tmp"
-	chmod 644 "$OUT_DIR/.tv.apk.tmp" "$OUT_DIR/.tv.json.tmp"
-	mv "$OUT_DIR/.tv.apk.tmp" "$OUT_DIR/tv.apk"
-	mv "$OUT_DIR/.tv.json.tmp" "$OUT_DIR/tv.json"
-	# Only now is the build recorded, so a crash above rebuilds next pass.
-	echo "$code" | write_atomic "$DATA_DIR/counter"
-	echo "$hash" | write_atomic "$DATA_DIR/inputs.sha256"
+	if ! publish "$apk" "$code" "$name"; then
+		rm -f "$OUT_DIR/.tv.apk.tmp" "$OUT_DIR/.tv.json.tmp"
+		log "could not publish the new app; keeping the previous one, will retry"
+		return 1
+	fi
+	# Recorded last: a crash before this rebuilds on the next pass.
+	echo "$hash" | write_atomic "$DATA_DIR/inputs.sha256" || return 1
 	log "published version $name"
 }
 
@@ -167,7 +184,7 @@ pass() {
 		log "$DATA_DIR/keystore.p12 exists but keystore.pass does not; waiting"
 		return 0
 	fi
-	make_keystore
+	make_keystore || return 1
 
 	code=$(($(cat "$DATA_DIR/counter" 2>/dev/null || echo 0) + 1))
 	rc=0
