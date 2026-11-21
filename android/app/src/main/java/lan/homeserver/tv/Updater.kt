@@ -157,9 +157,10 @@ class Updater(private val context: Context, private val urls: AppUrls, private v
                     commit(apk)
                     busy.set(false)
                 }
-            } catch (e: IOException) {
-                fail(context.getString(R.string.update_install_failed, e.message ?: ""), onError)
-            } catch (e: SecurityException) {
+            } catch (e: Exception) {
+                // Anything, not just I/O and security errors (the installer can
+                // throw IllegalStateException and the like): uncaught on this
+                // thread it would crash the app, and busy would stay set.
                 fail(context.getString(R.string.update_install_failed, e.message ?: ""), onError)
             } finally {
                 apk.delete()
