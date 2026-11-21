@@ -18,9 +18,11 @@ tmp=$(mktemp -d)
 export CERTS_DIR="$tmp/certs" HTTP_PORT=18080 HTTPS_PORT=18443
 # What the deployer publishes for the dashboard (a sample here).
 export DEPLOY_PUBLIC_DIR="$tmp/deploy-public"
-# Where the android service publishes the TV app (made here, as make up does).
+# Where the android service publishes the TV app. Not made here: like the
+# autodeployer, this leaves it to Docker (which creates it as root), so the
+# android checks below prove the builder takes it over.
 export TV_APP_DIR="$tmp/tv"
-mkdir -p "$DEPLOY_PUBLIC_DIR" "$TV_APP_DIR"
+mkdir -p "$DEPLOY_PUBLIC_DIR"
 cat >"$DEPLOY_PUBLIC_DIR/status.json" <<'JSON'
 {"version": 1, "last_result": "partial", "deployed": {"commit": "abc1234", "subject": "smoke", "at": "2026-11-15T10:00:00Z"},
  "held": [{"service": "web", "commit": "abc1234", "since": "2026-11-15T10:00:00Z", "reason": "unhealthy"}],
@@ -390,6 +392,7 @@ for _ in $(seq 180); do
 done
 [ -s "$TV_APP_DIR/tv.json" ] || fail "android: no tv.json after 15 minutes: $(compose logs --tail 20 android 2>&1)"
 [ "$(stat -c %u "$TV_APP_DIR/tv.apk")" = "$(id -u)" ] || fail "android: tv.apk not owned by $(id -u)"
+[ "$(stat -c %u "$TV_APP_DIR")" = "$(id -u)" ] || fail "android: $TV_APP_DIR (made by Docker) not handed to $(id -u)"
 
 apk_url="http://127.0.0.1:$HTTP_PORT/tv.apk"
 headers=$(curl -s -o /dev/null -D - "$apk_url" | tr -d '\r')

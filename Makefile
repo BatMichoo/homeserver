@@ -53,7 +53,7 @@ down:
 # check validates the scripts and configuration without starting anything.
 # nginx -t runs against a throwaway certificate.
 check:
-	$(SHELLCHECK) certs/issue-certs.sh db/setup.sh scripts/*.sh
+	$(SHELLCHECK) certs/issue-certs.sh db/setup.sh scripts/*.sh android/builder/*.sh
 	docker compose --env-file .env.template config -q
 	scripts/check-sites.sh nginx/sites/*.conf scripts/smoke/whoami.conf
 	@test -z "$$(gofmt -l auth deploy)" || { gofmt -l auth deploy; echo "run gofmt on the files above"; exit 1; }
@@ -137,22 +137,23 @@ ca-restore:
 # installed copies can't be updated, since Android refuses a different key).
 app-backup:
 	$(COMPOSE) build -q android
-	$(COMPOSE) run --rm -T --no-deps --entrypoint tar android czf - -C /data . > app-backup.tgz
+	$(COMPOSE) run --rm -T --no-deps --user builder --entrypoint tar android czf - -C /data . > app-backup.tgz
 	@chmod 600 app-backup.tgz
 	@echo "Saved the TV app's key to app-backup.tgz; keep it somewhere safe and private."
 
 # app-restore puts an app-backup.tgz back (e.g. on a new server).
 app-restore:
 	$(COMPOSE) build -q android
-	$(COMPOSE) run --rm -T --no-deps --entrypoint tar android xzf - -C /data < app-backup.tgz
+	$(COMPOSE) run --rm -T --no-deps --user builder --entrypoint tar android xzf - -C /data < app-backup.tgz
 	@echo "Restored the TV app's key; the next build (make up) signs with it."
 
 # android-test builds the builder image, then runs the app's Gradle tests
-# (with a test CA) and the build loop's tests inside it. /src in the image is
+# (with a test CA) and the build loop's tests inside it, as the builder user
+# like the real loop (the image itself starts as root). /src in the image is
 # a copy, hence the rebuild. The volume keeps Gradle's downloads between runs.
 android-test:
 	docker build -q -t hs-android-test android
-	docker run --rm -v hs-android-test-gradle:/cache/gradle --entrypoint sh hs-android-test -c '\
+	docker run --rm --user builder -v hs-android-test-gradle:/cache/gradle --entrypoint sh hs-android-test -c '\
 		gradle --no-daemon test \
 			-PlanDomain=homeserver.lan -PhttpsPort=443 -PhttpPort=80 \
 			-PcaFile=/src/app/src/test/resources/ca.pem -PversionCode=1 -PversionName=test && \

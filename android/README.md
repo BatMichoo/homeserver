@@ -28,10 +28,13 @@ directory, never into `src/`.
 
 ```bash
 docker build -t hs-android .
-docker run --rm -v hs-gradle:/cache/gradle -v /path/to/ca.crt:/ca.crt:ro -v "$PWD/out:/out" hs-android \
+docker run --rm --user builder -v hs-gradle:/cache/gradle -v /path/to/ca.crt:/ca.crt:ro -v "$PWD/out:/out" hs-android \
   sh -c 'cp -r /src /tmp/b && cd /tmp/b && gradle --no-daemon assembleDebug \
     -PlanDomain=homeserver.lan -PhttpsPort=443 -PhttpPort=80 -PcaFile=/ca.crt \
     -PversionCode=1 -PversionName=1-test && cp app/build/outputs/apk/debug/*.apk /out/'
 ```
 
-The `hs-gradle` volume keeps downloaded dependencies between builds.
+The `hs-gradle` volume keeps downloaded dependencies between builds. The
+image starts as root (its entrypoint fixes the owner of the mounted folders,
+then runs the build loop as `builder`), so run anything else in it with
+`--user builder`.

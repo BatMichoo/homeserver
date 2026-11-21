@@ -1,6 +1,7 @@
 #!/bin/sh
-# Tests for build-loop.sh. Run inside the builder image (it has keytool):
-#   docker run --rm --entrypoint sh hs-android /src/builder/test-build-loop.sh
+# Tests for build-loop.sh. Run inside the builder image (it has keytool), as
+# the builder user the loop runs as:
+#   docker run --rm --user builder --entrypoint sh hs-android /src/builder/test-build-loop.sh
 # A fake GRADLE_CMD stands in for Gradle: it logs its arguments, writes a fake
 # APK where the real build puts it, and can be told to fail or to kill itself.
 set -u

@@ -38,7 +38,8 @@ RUN curl -fsSL -o /tmp/cmdline.zip "https://dl.google.com/android/repository/${C
  && /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0" \
  && rm -rf /opt/android-sdk/cmdline-tools /tmp/cmdline /tmp/cmdline.zip
 
-# Non-root; /cache/gradle is meant to be a volume so dependencies download once.
+# The builds run as builder; /cache/gradle is meant to be a volume so
+# dependencies download once.
 RUN useradd -m -u 1000 builder \
  && mkdir -p /cache/gradle /data /out /src \
  && chown -R builder:builder /opt/android-sdk /cache /data /out /src
@@ -46,10 +47,16 @@ RUN useradd -m -u 1000 builder \
 # builder, so new android-data / android-gradle volumes inherit that owner.
 
 COPY --chown=builder:builder . /src
-USER builder
 WORKDIR /src
+
+# The image starts as root so the entrypoint can fix the owner of a mounted
+# /out that Docker created as root, then it drops to builder for good (see
+# entrypoint.sh). It is copied outside /src, root-owned, so the builder can't
+# change what runs as root on the next start. Run anything else in the image
+# with --user builder.
+COPY builder/entrypoint.sh /usr/local/bin/tv-entrypoint
 
 # The loop keeps /out/tv.apk current. It touches /tmp/ready as soon as it
 # runs, which is what the healthcheck looks for.
 HEALTHCHECK CMD test -f /tmp/ready
-ENTRYPOINT ["/src/builder/build-loop.sh"]
+ENTRYPOINT ["/usr/local/bin/tv-entrypoint"]
