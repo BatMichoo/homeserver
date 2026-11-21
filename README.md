@@ -267,8 +267,14 @@ once. The first build takes a few minutes and needs the network; after that
 it rebuilds by itself when the app, the CA or the settings change, and
 publishes `tv.apk` and `tv.json` (in `TV_APP_DIR`).
 
+The builder checks for changes once an hour, so a new home CA (or other
+settings) reaches the app within an hour; `docker compose restart android`
+checks right away. Docs and test-only changes under `android/` don't publish
+a new version.
+
 **Install:** on the TV, open `http://<LAN_DOMAIN>/tv.apk` in a browser or a
-downloader app, or sideload it from a computer with
+downloader app (`http://<LAN_DOMAIN>:<HTTP_PORT>/tv.apk` when `HTTP_PORT`
+isn't 80), or sideload it from a computer with
 `adb connect <TV IP>` and `adb install tv.apk`. Allow installing from
 unknown sources once when asked. Later updates are offered in the app.
 
@@ -276,6 +282,13 @@ unknown sources once when asked. Later updates are offered in the app.
 `make app-restore` puts it back). Android only updates an app that is signed
 with the same key, so without the backup a new server means uninstalling the
 app from every device first. Keep the file private.
+
+On a new server, run `make app-restore` before the first `make up` where
+you can, so no app is ever signed with a throwaway key. Restoring later
+works too: it stops the `android` service, replaces its state (key, version
+counter) with the backup's, and starts it again, and the next pass rebuilds
+the app with the restored key. The next version code is above both the
+restored counter and the published `tv.json`, so installed apps accept it.
 
 `make android-test` runs the app's tests.
 

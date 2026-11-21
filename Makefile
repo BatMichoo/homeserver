@@ -141,11 +141,22 @@ app-backup:
 	@chmod 600 app-backup.tgz
 	@echo "Saved the TV app's key to app-backup.tgz; keep it somewhere safe and private."
 
-# app-restore puts an app-backup.tgz back (e.g. on a new server).
+# app-restore puts an app-backup.tgz back (e.g. on a new server). The android
+# service is stopped meanwhile so it can't build with half a keystore. The
+# builder's state is replaced, not merged, and the recorded input hash is
+# dropped, so the next pass rebuilds and re-signs the app with the restored
+# key even when nothing else changed (otherwise the APK signed with the other
+# key would count as up to date). The service is started again if it was
+# running.
 app-restore:
+	@test -s app-backup.tgz || { echo "app-backup.tgz is missing"; exit 1; }
 	$(COMPOSE) build -q android
-	$(COMPOSE) run --rm -T --no-deps --user builder --entrypoint tar android xzf - -C /data < app-backup.tgz
-	@echo "Restored the TV app's key; the next build (make up) signs with it."
+	@running=$$($(COMPOSE) ps -q --status running android); \
+	$(COMPOSE) stop android && \
+	$(COMPOSE) run --rm -T --no-deps --user builder --entrypoint sh android -c \
+		'find /data -mindepth 1 -delete && tar xzf - -C /data && rm -f /data/inputs.sha256' < app-backup.tgz && \
+	if [ -n "$$running" ]; then $(COMPOSE) start android; fi
+	@echo "Restored the TV app's key; the next build signs with it (make up, or now if android was running)."
 
 # android-test builds the builder image, then runs the app's Gradle tests
 # (with a test CA) and the build loop's tests inside it, as the builder user
