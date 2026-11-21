@@ -91,6 +91,46 @@ test_counter_increases() {
 	check "build/ and .gradle/ ignored" test "$(counter)" = 4
 }
 
+# Docs, the builder's own scripts and the unit tests don't go into the APK:
+# changing them must not publish a new version (every TV would be asked to
+# update for nothing). What does go in still rebuilds.
+test_non_app_files_ignored() {
+	new_env scope
+	run || return 1
+	echo "docs" >"$SRC_DIR/README.md"
+	echo "build" >"$SRC_DIR/.dockerignore"
+	mkdir -p "$SRC_DIR/builder" "$SRC_DIR/app/src/test" "$SRC_DIR/app/src/main"
+	echo "echo hi" >"$SRC_DIR/builder/build-loop.sh"
+	echo "class T" >"$SRC_DIR/app/src/test/T.kt"
+	run || return 1
+	check "README, .dockerignore, builder/, app/src/test/ ignored" test "$(calls)" = 1 || return 1
+	check "counter still 1" test "$(counter)" = 1 || return 1
+	echo "class M" >"$SRC_DIR/app/src/main/M.kt"
+	run || return 1
+	check "app/src/main change rebuilds" test "$(counter)" = 2 || return 1
+	echo "FROM x" >"$SRC_DIR/Dockerfile"
+	run || return 1
+	check "Dockerfile change rebuilds" test "$(counter)" = 3
+}
+
+# The counter can be behind what is published: lost with the volume, or put
+# back by an older app-restore. The next code must still be above the
+# published one, or no TV would accept the update.
+test_code_above_published() {
+	new_env above
+	echo '{"versionCode": 7, "versionName": "7-abcdef0", "apk": "/tv.apk"}' >"$OUT_DIR/tv.json"
+	run || return 1
+	check "no counter: 8 after published 7" has '"versionCode": 8[,}]' "$OUT_DIR/tv.json" || return 1
+	check "counter 8" test "$(counter)" = 8 || return 1
+	echo 3 >"$DATA_DIR/counter"
+	LAN_DOMAIN=other.lan run || return 1
+	check "lower counter: 9 after published 8" has '"versionCode": 9[,}]' "$OUT_DIR/tv.json" || return 1
+	# and a counter ahead of tv.json (a code burned by a failed build) wins
+	echo 20 >"$DATA_DIR/counter"
+	LAN_DOMAIN=third.lan run || return 1
+	check "higher counter: 21" has '"versionCode": 21[,}]' "$OUT_DIR/tv.json"
+}
+
 test_keystore_kept() {
 	new_env keystore
 	run || return 1
@@ -205,7 +245,8 @@ test_empty_domain_waits() {
 }
 
 for name in test_first_build_publishes test_unchanged_inputs_skip test_counter_increases \
-	test_keystore_kept test_interrupted_build_keeps_previous test_publish_failure_keeps_previous \
+	test_non_app_files_ignored test_code_above_published test_keystore_kept \
+	test_interrupted_build_keeps_previous test_publish_failure_keeps_previous \
 	test_keystore_failure_stops test_killed_between_publish_steps test_low_disk_skips \
 	test_missing_ca_waits test_empty_domain_waits; do
 	if "$name"; then echo "ok   $name"; else

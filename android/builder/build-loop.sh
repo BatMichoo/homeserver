@@ -1,13 +1,14 @@
 #!/bin/sh
-# Entrypoint of the Android builder image: keeps /out/tv.apk in step with the
-# server's own settings.
+# The Android builder image's loop (started as the builder user by
+# entrypoint.sh): keeps /out/tv.apk in step with the server's own settings.
 #
 # Every $CHECK_EVERY seconds it hashes everything that goes into the app (the
 # sources, the home CA, the LAN domain and the ports). When the hash differs
 # from the one of the last published build, it compiles a new APK signed with
 # a keystore that is created once in $DATA_DIR, and publishes it together with
-# tv.json (read by the web app to offer the download). The version code is a
-# counter kept in $DATA_DIR, so every published build can update the previous.
+# tv.json (read by the web app to offer the download). The version code is one
+# above both a counter kept in $DATA_DIR and the published tv.json, so every
+# published build can update the previous.
 #
 # A build that fails or is killed changes nothing: the previous tv.apk, tv.json,
 # counter and hash stay as they were and the next pass retries.
@@ -42,13 +43,16 @@ trap 'exit 143' TERM INT
 
 # inputs_hash prints one SHA-256 over every input of the build. Files are
 # listed in a fixed order and hashed with their relative paths, so renaming a
-# file changes the hash as well as editing it. Build output directories are
-# left out: they change without the app changing.
+# file changes the hash as well as editing it. Left out is what changes
+# without the app changing: build output, the docs, this builder's scripts
+# and the unit tests. A new hash means a new version code, and every TV is
+# then asked to update.
 inputs_hash() {
 	{
 		(
 			cd "$SRC_DIR"
-			find . -type d \( -name build -o -name .gradle -o -name out \) -prune -o -type f -print |
+			find . -type d \( -name build -o -name .gradle -o -name out -o -path ./builder -o -path ./app/src/test \) -prune \
+				-o -type f ! -path ./README.md ! -path ./.dockerignore -print |
 				LC_ALL=C sort |
 				while IFS= read -r f; do sha256sum "$f"; done
 		)
@@ -148,6 +152,18 @@ build() {
 	log "published version $name"
 }
 
+# next_code prints the highest version code already used: the counter or the
+# published tv.json, whichever is higher. The counter alone can be behind (a
+# lost android-data volume, a restored backup), and a code at or below the
+# published one would never install over it.
+next_code() {
+	counter=$(cat "$DATA_DIR/counter" 2>/dev/null || true)
+	published=$(sed -n 's/.*"versionCode": *\([0-9][0-9]*\).*/\1/p' "$OUT_DIR/tv.json" 2>/dev/null | head -n 1)
+	case $counter in '' | *[!0-9]*) counter=0 ;; esac
+	case $published in '' | *[!0-9]*) published=0 ;; esac
+	if [ "$published" -gt "$counter" ]; then echo "$published"; else echo "$counter"; fi
+}
+
 # pass does one check and, if the inputs changed, one build. Returns 1 only
 # when a build failed.
 pass() {
@@ -186,7 +202,7 @@ pass() {
 	fi
 	make_keystore || return 1
 
-	code=$(($(cat "$DATA_DIR/counter" 2>/dev/null || echo 0) + 1))
+	code=$(($(next_code) + 1))
 	rc=0
 	build "$code" "$code-$(echo "$hash" | cut -c1-7)" "$hash" || rc=1
 	cleanup
