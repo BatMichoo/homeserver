@@ -111,3 +111,9 @@ androidComponents {
         variant.sources.res?.addGeneratedSourceDirectory(task, GenerateTrustConfig::outputDir)
     }
 }
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    // The Android jar's org.json is stubbed in JVM tests, so bring the real one.
+    testImplementation("org.json:json:20240303")
+}
