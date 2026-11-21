@@ -47,5 +47,7 @@ COPY --chown=builder:builder . /src
 USER builder
 WORKDIR /src
 
-# Harmless default; the build-loop entrypoint is added with the builder script.
-CMD ["gradle", "--version"]
+# The loop keeps /out/tv.apk current. It touches /tmp/ready as soon as it
+# runs, which is what the healthcheck looks for.
+HEALTHCHECK CMD test -f /tmp/ready
+ENTRYPOINT ["/src/builder/build-loop.sh"]
