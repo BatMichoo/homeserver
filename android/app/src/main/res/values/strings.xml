@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Home Server</string>
+    <string name="error_offline">Can\'t reach the home server. Check that it is on and that this device is on the home network.</string>
+    <string name="error_untrusted">This device no longer trusts the home server\'s certificate. Reinstall the app from: %1$s</string>
+    <string name="error_other">The page could not be loaded.</string>
+    <string name="retry">Retry</string>
 </resources>
