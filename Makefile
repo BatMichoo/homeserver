@@ -146,16 +146,32 @@ app-backup:
 # builder's state is replaced, not merged, and the recorded input hash is
 # dropped, so the next pass rebuilds and re-signs the app with the restored
 # key even when nothing else changed (otherwise the APK signed with the other
-# key would count as up to date). The same container is started again if it
-# was running (by id: `compose start` would re-check its dependencies).
+# key would count as up to date). The current key may be the only good one
+# (losing it means uninstalling the app on every device), so nothing in /data
+# is touched until the archive has listed cleanly, holds both keystore files
+# and has extracted completely into a temp dir inside /data; only then is the
+# old state swapped out. The same container is started again if it was
+# running, whether the restore worked or not (by id: `compose start` would
+# re-check its dependencies).
 app-restore:
 	@test -s app-backup.tgz || { echo "app-backup.tgz is missing"; exit 1; }
 	$(COMPOSE) build -q android
 	@running=$$($(COMPOSE) ps -q --status running android); \
 	$(COMPOSE) stop android && \
-	$(COMPOSE) run --rm -T --no-deps --user builder --entrypoint sh android -c \
-		'find /data -mindepth 1 -delete && tar xzf - -C /data && rm -f /data/inputs.sha256' < app-backup.tgz && \
-	if [ -n "$$running" ]; then docker start $$running >/dev/null; fi
+	$(COMPOSE) run --rm -T --no-deps --user builder --entrypoint sh android -c '\
+		cat >/tmp/restore.tgz || exit 1; \
+		gzip -t /tmp/restore.tgz && tar tzf /tmp/restore.tgz >/tmp/restore.list || { echo "app-backup.tgz is not a readable archive; the current key was left alone" >&2; exit 1; }; \
+		for f in keystore.p12 keystore.pass; do \
+			sed "s|^\./||" /tmp/restore.list | grep -qx "$$f" || { echo "app-backup.tgz has no $$f; the current key was left alone" >&2; exit 1; }; \
+		done; \
+		rm -rf /data/.restore.new; \
+		mkdir /data/.restore.new && tar xzf /tmp/restore.tgz -C /data/.restore.new || { rm -rf /data/.restore.new; echo "extracting app-backup.tgz failed; the current key was left alone" >&2; exit 1; }; \
+		find /data -mindepth 1 -maxdepth 1 ! -name .restore.new -exec rm -rf {} + && \
+		find /data/.restore.new -mindepth 1 -maxdepth 1 -exec mv {} /data/ \; && \
+		rmdir /data/.restore.new && rm -f /data/inputs.sha256' < app-backup.tgz; \
+	rc=$$?; \
+	if [ -n "$$running" ]; then docker start $$running >/dev/null; fi; \
+	exit $$rc
 	@echo "Restored the TV app's key; the next build signs with it (make up, or now if android was running)."
 
 # android-test builds the builder image, then runs the app's Gradle tests
