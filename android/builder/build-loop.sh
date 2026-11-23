@@ -23,8 +23,8 @@ OUT_DIR=${OUT_DIR:-/out}
 SRC_DIR=${SRC_DIR:-/src}
 CHECK_EVERY=${CHECK_EVERY:-3600}
 MIN_FREE_KB=${MIN_FREE_KB:-3145728} # a cold Gradle build needs about 3 GB
-OUT_UID=${OUT_UID:-1000}            # owner of the published files, so the host
-OUT_GID=${OUT_GID:-1000}            # user can read and delete them
+OUT_UID=${OUT_UID:-1000}            # the host user, who must be able to read
+OUT_GID=${OUT_GID:-1000}            # and delete the published files
 GRADLE_CMD=${GRADLE_CMD:-gradle}
 GRADLE_USER_HOME=${GRADLE_USER_HOME:-/cache/gradle}
 ONCE=${ONCE:-}
@@ -80,12 +80,13 @@ make_keystore() {
 	)
 }
 
-# give_away hands a published file to OUT_UID:OUT_GID. That only works as
-# root; otherwise it is fine as long as the file already has that owner.
+# give_away hands a published file to OUT_UID:OUT_GID when running as root.
+# The builder (not root) can't, and doesn't need to: the files are world
+# readable and OUT_DIR belongs to the host user (entrypoint.sh), so the host
+# user can read and delete them whoever owns them.
 give_away() {
-	chown "$OUT_UID:$OUT_GID" "$1" 2>/dev/null && return 0
-	[ "$(stat -c %u:%g "$1")" = "$OUT_UID:$OUT_GID" ] ||
-		log "cannot change the owner of $1 to $OUT_UID:$OUT_GID; it stays $(stat -c %u:%g "$1")"
+	[ "$(id -u)" = 0 ] || return 0
+	chown "$OUT_UID:$OUT_GID" "$1" || log "cannot change the owner of $1 to $OUT_UID:$OUT_GID"
 }
 
 # write_atomic stores stdin in $1 through a temp file, so a reader never sees

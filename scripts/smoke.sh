@@ -381,8 +381,8 @@ echo "expenser: ok"
 
 # --- android (TV app) --------------------------------------------------------
 # The android service really builds the APK (Gradle, a few minutes; needs the
-# network the first time), so wait for tv.json up to 15 minutes. Its owner
-# must be this user (OUT_UID), and it is published after tv.apk.
+# network the first time), so wait for tv.json up to 15 minutes; it is
+# published after tv.apk.
 compose up -d --build --wait android >/dev/null 2>&1 || fail "android: did not start (healthcheck)"
 echo "android: waiting for the first APK build (up to 15 minutes)..."
 for _ in $(seq 180); do
@@ -391,8 +391,14 @@ for _ in $(seq 180); do
 	sleep 5
 done
 [ -s "$TV_APP_DIR/tv.json" ] || fail "android: no tv.json after 15 minutes: $(compose logs --tail 20 android 2>&1)"
-[ "$(stat -c %u "$TV_APP_DIR/tv.apk")" = "$(id -u)" ] || fail "android: tv.apk not owned by $(id -u)"
+# The host user must be able to read and delete what is published. The files
+# belong to the builder (uid 1000), which is only this user when its uid is
+# 1000 too (not on CI), so check what the user can do, not who owns them.
 [ "$(stat -c %u "$TV_APP_DIR")" = "$(id -u)" ] || fail "android: $TV_APP_DIR (made by Docker) not handed to $(id -u)"
+[ -w "$TV_APP_DIR" ] || fail "android: $TV_APP_DIR not writable by $(id -u), so it can't delete what is published"
+for f in tv.apk tv.json; do
+	[ -r "$TV_APP_DIR/$f" ] || fail "android: $f not readable by $(id -u)"
+done
 
 apk_url="http://127.0.0.1:$HTTP_PORT/tv.apk"
 headers=$(curl -s -o /dev/null -D - "$apk_url" | tr -d '\r')
