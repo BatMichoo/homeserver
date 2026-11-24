@@ -239,12 +239,14 @@ class MainActivity : Activity() {
     }
 
     // Back: fullscreen, then the error view, then page history, then exit.
+    // On the media home page it exits straight away: the history behind it
+    // is only pages already left, and walking back through them never ends.
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         when {
             customView != null -> chrome.onHideCustomView()
             errorView.showing -> errorView.hide()
-            webView.canGoBack() -> webView.goBack()
+            webView.canGoBack() && !urls.isStart(webView.url) -> webView.goBack()
             else -> finish()
         }
     }

@@ -12,5 +12,18 @@ class AppUrls(private val lanDomain: String, private val httpsPort: Int, private
     // matches the server's, since the HTTPS update check would fail then.
     val reinstall: String get() = "http://$lanDomain${port(httpPort, 80)}/tv.apk"
 
+    // isStart: url is the media home page (query and fragment aside), where
+    // Back leaves the app instead of going back through the page history.
+    fun isStart(url: String?): Boolean {
+        val u = try {
+            java.net.URI(url ?: return false)
+        } catch (e: java.net.URISyntaxException) {
+            return false
+        }
+        val port = if (u.port == -1) 443 else u.port
+        return u.scheme == "https" && u.host.equals("media.$lanDomain", ignoreCase = true) &&
+            port == httpsPort && (u.rawPath.isNullOrEmpty() || u.rawPath == "/")
+    }
+
     fun https(path: String): String = "https://$lanDomain${port(httpsPort, 443)}$path"
 }
