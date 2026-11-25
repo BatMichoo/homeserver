@@ -23,8 +23,11 @@ class ErrorView(context: Context, onRetry: () -> Unit) : LinearLayout(context) {
         setBackgroundColor(Color.BLACK)
         val pad = (32 * resources.displayMetrics.density).toInt()
         setPadding(pad, pad, pad, pad)
-        // Swallow touches so the dead page underneath can't be tapped.
+        // Swallow touches so the dead page underneath can't be tapped. Not
+        // focusable, though clickable views are by default: the remote's
+        // focus belongs on Retry, not on the black screen around it.
         isClickable = true
+        isFocusable = false
         visibility = View.GONE
 
         message.setTextColor(Color.WHITE)

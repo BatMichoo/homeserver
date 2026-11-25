@@ -29,6 +29,11 @@ class UpdateBanner(
         val pad = (16 * resources.displayMetrics.density).toInt()
         setPadding(pad, pad, pad, pad)
         isClickable = true
+        // Being clickable makes a view focusable by default (Android 8+), and
+        // a focusable bar takes the focus itself when asked for it, leaving
+        // Install unfocused and OK on the remote doing nothing. The bar only
+        // swallows taps; the focus goes to its buttons.
+        isFocusable = false
 
         message.setTextColor(Color.WHITE)
         message.textSize = 18f
@@ -40,7 +45,6 @@ class UpdateBanner(
         addView(message, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         addView(install, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         addView(later, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
-        install.requestFocus()
     }
 
     fun setBusy() {
