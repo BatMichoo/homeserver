@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.net.http.SslError
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
@@ -46,6 +47,7 @@ class MainActivity : Activity() {
 
     private val updater by lazy { Updater(this, urls, homeCa) }
     private var banner: UpdateBanner? = null
+    private val updateSchedule = UpdateSchedule(UPDATE_CHECK_EVERY_MS)
     private val chrome = Chrome()
     private var failedUrl: String? = null
     private var playing = false
@@ -70,6 +72,15 @@ class MainActivity : Activity() {
         // a WebView update in between); the app then starts afresh.
         if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) webView.loadUrl(urls.start)
 
+        // The first update check runs in onResume, which follows right away.
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (updateSchedule.due(SystemClock.elapsedRealtime())) checkForUpdate()
+    }
+
+    private fun checkForUpdate() {
         updater.check { info -> if (info != null && info.newerThan(BuildConfig.VERSION_CODE)) showUpdateBanner(info) }
     }
 
@@ -305,6 +316,9 @@ class MainActivity : Activity() {
     }
 
     private companion object {
+        // How often a running app asks the server for a newer version.
+        const val UPDATE_CHECK_EVERY_MS = 6 * 60 * 60 * 1000L
+
         val MEDIA_KEYS = setOf(
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE,
             KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_MEDIA_REWIND,
